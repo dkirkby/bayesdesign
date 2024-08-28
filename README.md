@@ -1,6 +1,6 @@
 # Example PyPI (Python Package Index) Package & Tutorial / Instruction / Workflow for 2021
 
-[![PyPI package](https://img.shields.io/badge/pip%20install-example--pypi--package-brightgreen)](https://pypi.org/project/example-pypi-package/) [![version number](https://img.shields.io/pypi/v/example-pypi-package?color=green&label=version)](https://github.com/tomchen/example_pypi_package/releases) [![Actions Status](https://github.com/tomchen/example_pypi_package/workflows/Test/badge.svg)](https://github.com/tomchen/example_pypi_package/actions) [![License](https://img.shields.io/github/license/tomchen/example_pypi_package)](https://github.com/tomchen/example_pypi_package/blob/main/LICENSE)
+[![PyPI package](https://img.shields.io/badge/pip%20install-example--pypi--package-brightgreen)](https://pypi.org/project/example-pypi-package/) [![version number](https://img.shields.io/pypi/v/example-pypi-package?color=green&label=version)](https://github.com/dkirkby/bayesdesign/releases) [![Actions Status](https://github.com/dkirkby/bayesdesign/workflows/Test/badge.svg)](https://github.com/dkirkby/bayesdesign/actions) [![License](https://img.shields.io/github/license/dkirkby/bayesdesign)](https://github.com/dkirkby/bayesdesign/blob/main/LICENSE)
 
 This is an example [PyPI](https://pypi.org/) (Python Package Index) package set up with automated tests and package publishing workflow using GitHub Actions CI/CD. It is made primarily for GitHub + VS Code (Windows / Mac / Linux) users who are about to write and publish their first PyPI package. The package could serve as a starter / boilerplate / demo and the tutorial could give you a quick and concise explaination to solve some small but annoying problems you might encounter, such as package / module name confusion, and VS Code test configuration issues.
 
@@ -24,17 +24,17 @@ This example package is inspired by / based on the [official sample project pypa
 
 ### Use as a template
 
-[![Use the template](https://img.shields.io/static/v1?label=&message=Click%20here%20to%20use%20this%20package%20as%20a%20template%20to%20start%20a%20new%20repo%20on%20GitHub&color=brightgreen&style=for-the-badge)](https://github.com/tomchen/example_pypi_package/generate)
+[![Use the template](https://img.shields.io/static/v1?label=&message=Click%20here%20to%20use%20this%20package%20as%20a%20template%20to%20start%20a%20new%20repo%20on%20GitHub&color=brightgreen&style=for-the-badge)](https://github.com/dkirkby/bayesdesign/generate)
 
 (Click the above button to use this example package as a template for your new GitHub repo, this will initialize a new repository and my commits will not be in your git history)
 
-(If you do not use GitHub, you can [download the archive of the example package](https://github.com/tomchen/example_pypi_package/archive/main.zip))
+(If you do not use GitHub, you can [download the archive of the example package](https://github.com/dkirkby/bayesdesign/archive/main.zip))
 
 ### Package, module name
 
-Many use a same package and module name, you could definitely do that. But this example package and its module's names are different: `example_pypi_package` and `examplepy`.
+Many use a same package and module name, you could definitely do that. But this example package and its module's names are different: `bayesdesign` and `bed`.
 
-Open `example_pypi_package` folder with Visual Studio Code, <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd> (Windows / Linux) or <kbd>Cmd</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd> (MacOS) to find all occurrences of both names and replace them with your package and module's names. Also remember to change the name of the folder **src/examplepy**.
+Open `bayesdesign` folder with Visual Studio Code, <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd> (Windows / Linux) or <kbd>Cmd</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd> (MacOS) to find all occurrences of both names and replace them with your package and module's names. Also remember to change the name of the folder **src/bed**.
 
 Simply and very roughly speaking, package name is used in `pip install <PACKAGENAME>` and module name is used in `import <MODULENAME>`. Both names should consist of lowercase basic letters (a-z). They may have underscores (`_`) if you really need them. Hyphen-minus (`-`) should not be used.
 
@@ -56,7 +56,7 @@ There's also [namespace](https://packaging.python.org/guides/packaging-namespace
 
 Make necessary changes in **setup.py**.
 
-The package's version number `__version__` is in **src/examplepy/\_\_init\_\_.py**. You may want to change that.
+The package's version number `__version__` is in **src/bed/\_\_init\_\_.py**. You may want to change that.
 
 The example package is designed to be compatible with Python 3.6, 3.7, 3.8, 3.9, and will be tested against these versions. If you need to change the version range, you should change:
 
@@ -96,7 +96,7 @@ In VS Code, you can go to File -> Preferences -> Settings, type "Python Formatti
 
 ### Write your package
 
-In **src/examplepy/** (`examplepy` should have been replaced by your module name) folder, rename **module1.py** and write your code in it. Add more module .py files if you need to.
+In **src/bed/** (`bed` should have been replaced by your module name) folder, rename **module1.py** and write your code in it. Add more module .py files if you need to.
 
 ### Write your tests
 
@@ -123,7 +123,7 @@ tox -e py39
 
 </details>
 
-If you add more files to the root directory (**example_pypi_package/**), you'll need to add your file to `check-manifest --ignore` list in **tox.ini**.
+If you add more files to the root directory (**bayesdesign/**), you'll need to add your file to `check-manifest --ignore` list in **tox.ini**.
 
 <details><summary><strong>Thanks to GitHub Actions' automated process, you don't need to generate distribution files locally. But if you insist, click to read the "Generate distribution files" section</strong></summary>
 
@@ -141,7 +141,7 @@ python -m pip install --user --upgrade setuptools wheel
 
 ### Generate `dist`
 
-From `example_pypi_package` directory, run the following command, in order to generate production version for source distribution (sdist) in `dist` folder:
+From `bayesdesign` directory, run the following command, in order to generate production version for source distribution (sdist) in `dist` folder:
 
 ```bash
 python setup.py sdist bdist_wheel
@@ -152,13 +152,13 @@ python setup.py sdist bdist_wheel
 Optionally, you can install dist version of your package locally before uploading to [PyPI](https://pypi.org/) or [TestPyPI](https://test.pypi.org/):
 
 ```bash
-pip install dist/example_pypi_package-0.1.0.tar.gz
+pip install dist/bayesdesign-0.1.0.tar.gz
 ```
 
 (You may need to uninstall existing package first:
 
 ```bash
-pip uninstall example_pypi_package
+pip uninstall bayesdesign
 ```
 
 There may be several installed packages with the same name, so run `pip uninstall` multiple times until it says no more package to remove.)
@@ -228,7 +228,7 @@ python -m twine upload --repository pypi dist/*
 
 When you finished developing a newer version of your package, do the following things.
 
-Modify the version number `__version__` in **src\examplepy\_\_init\_\_.py**.
+Modify the version number `__version__` in **src\bed\_\_init\_\_.py**.
 
 Delete all old versions in **dist**.
 
@@ -255,4 +255,4 @@ python -m twine upload --repository pypi dist/*
 - [Stackoverflow questions and answers](https://stackoverflow.com/questions/41093648/how-to-test-that-pypi-install-will-work-before-pushing-to-pypi-python)
 - [GitHub Actions Guides: Building and testing Python](https://docs.github.com/en/free-pro-team@latest/actions/guides/building-and-testing-python)
 
-Btw, if you want to publish TypeScript (JavaScript) package to the npm registry, go to [Example TypeScript Package ready to be published on npm for 2021](https://github.com/tomchen/example-typescript-package).
+Btw, if you want to publish TypeScript (JavaScript) package to the npm registry, go to [Example TypeScript Package ready to be published on npm for 2021](https://github.com/dkirkby/example-typescript-package).

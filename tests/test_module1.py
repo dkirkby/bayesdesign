@@ -1,6 +1,6 @@
 import unittest
 
-from examplepy.module1 import Number
+from bed.module1 import Number
 
 
 class TestSimple(unittest.TestCase):
@@ -9,5 +9,5 @@ class TestSimple(unittest.TestCase):
         self.assertEqual((Number(5) + Number(6)).value, 11)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()
