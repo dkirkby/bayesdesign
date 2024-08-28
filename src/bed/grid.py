@@ -137,10 +137,60 @@ class Grid:
         return (axis.min(), axis.max())
 
     def index(self, name, value):
-        """Return the index of the named axis and the location along that axis that is closest to the specified value.
+        """Return the index of the named axis and the location along that axis that is closest
+        to the specified value.
         Used to implement GridStack.at()
         """
         axis = self.axis(name)
         deltas = value - self.axes[name]
         idx = np.argmin(np.abs(deltas))
         return (axis, idx)
+
+
+class GridStack:
+    """A context manager to allow grids to be temporarily stacked together to create a larger grid."""
+
+    def __init__(self, *grids):
+        self.grids = grids
+
+    def __str__(self):
+        return "[" + ",".join([str(grid) for grid in self.grids]) + "]"
+
+    def __repr__(self):
+        return "[" + ", ".join([repr(grid) for grid in self.grids]) + "]"
+
+    def __enter__(self):
+        offset = 0
+        pad = 0
+        offset = sum([len(grid.axes) for grid in self.grids])
+        for grid in self.grids[::-1]:
+            assert (
+                grid._stack_offset == 0 and grid._stack_pad == 0
+            ), "Is there a duplicated grid in the stack?"
+            ngrid = len(grid.axes)
+            grid._stack_pad = pad
+            pad += ngrid
+            offset -= ngrid
+            grid._stack_offset = offset
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        for grid in self.grids:
+            grid._stack_offset = 0
+            grid._stack_pad = 0
+
+    def at(self, **coords):
+        naxes = sum([len(grid.axes) for grid in self.grids])
+        idx = [slice(None)] * naxes
+        found = {name: False for name in coords}
+        for grid in self.grids:
+            for name, value in coords.items():
+                if found[name] or (name not in grid.axes):
+                    continue
+                (axis, loc) = grid.index(name, value)
+                found[name] = True
+                idx[axis] = loc
+        missing = [name for name in found if not found[name]]
+        if missing:
+            raise ValueError(f'Invalid grid name(s): {", ".join(missing)}')
+        return tuple(idx)
