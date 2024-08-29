@@ -4,4 +4,4 @@
 
 Use this package to calculate expected information gain for Bayesian optimal experiment design. For a general introduction to this topic, see this [interactive notebook](https://observablehq.com/@dkirkby/boed).
 
-This package was generated from [this template](tomchen/example_pypi_package) so refer there for details on how to work with VS code, set python testing versions, etc.
+This package was generated from [this template](https://github.com/tomchen/example_pypi_package) so refer there for details on how to work with VS code, set python testing versions, etc.
