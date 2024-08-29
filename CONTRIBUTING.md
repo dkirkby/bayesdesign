@@ -16,7 +16,7 @@ If there is not already a relevant [open issue](https://github.com/dkirkby/bayes
 
 ### Release a new version
 
-Update the version string in `src/bed/__init__.py` and the top of the `CHANGELOG.md` file, then commit:
+Update the version string in `src/bed/__init__.py` (by removing "dev") and the top of the `CHANGELOG.md` file, then commit:
 ```
 git add src/bed/__init__.py CHANGELOG.md
 git commit -m 'Prepare for release'
@@ -27,4 +27,22 @@ Tag the version in github, adding "v" in front of the numerical version, e.g. fo
 git tag v0.1.0
 git push --tags
 ```
-Create a new release on github [here](https://github.com/dkirkby/bayesdesign/releases/new). Select the newly created tag from the "Choose a tag" drop-down menu and leave the "Release title" blank.
+Create a new release on github [here](https://github.com/dkirkby/bayesdesign/releases/new):
+ - Select the newly created tag from the "Choose a tag" drop-down menu.
+ - Leave the "Release title" blank.
+ - Click "Generate release notes".
+ - Click "Publish release".
+ - Check that the Release github action has uploaded this version to pypi [here](https://pypi.org/project/bayesdesign).
+
+## Start work on the next version
+
+Bump the version string in `src/bed/__init__.py` and append "dev".
+
+Add a new `## [Unreleased]` section to the top of the `CHANGELOG.md` file.
+
+Push to github:
+```
+git add src/bed/__init__.py CHANGELOG.md
+git commit -m 'Start work on next version'
+git push
+```
