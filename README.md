@@ -25,7 +25,7 @@ params.normalize(prior);
 
 designer.calculateEIG(prior)
 
-ax.plot(designs.t_obs, designer.EIG)
+plt.plot(designs.t_obs, designer.EIG)
 ```
 
 Browse the [examples folder](https://github.com/dkirkby/bayesdesign/) to learn more about using this package.
