@@ -21,7 +21,8 @@ class Grid:
                         idx = self.names.index(tname)
                     except ValueError:
                         raise ValueError(f'Unknown name "{tname}" in {name}')
-                    group[tname] = self.axes[tname]
+                    # Make a copy of the original axis since we will be modifying it.
+                    group[tname] = np.array(self.axes[tname])
                 # Build a dictionary with keys name1, name2, ... and corresponding values for a fully populated mesh grid.
                 full_group = dict(
                     zip(
@@ -47,7 +48,8 @@ class Grid:
                     }
                 except Exception as e:
                     raise RuntimeError(f"{name} filter failed: {e}")
-                self.keep_groups.append(keep_group)
+                # Remember the original axes for this group.
+                self.keep_groups.append(group)
                 # Replace original unfiltered axes in this group.
                 offset = None
                 for tname, axis in keep_group.items():

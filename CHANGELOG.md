@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file. The format 
 ### Added
 
 - Instructions on starting work on next version added to CONTRIBUTING.md
+- Notebook to demonstrate grid constraints (see [issue#1](https://github.com/dkirkby/bayesdesign/issues/1))
 
 ### Fixed
 
