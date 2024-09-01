@@ -1,83 +1,74 @@
 """Utility functions for working with discrete grids of variables."""
 
+import inspect
 import numpy as np
 
 
 class Grid:
 
-    def __init__(self, **axes):
+    def __init__(self, constraint=None, **axes):
         self.axes = {}
-        mesh = []
-        self.names = []
-        self.offsets = []
-        self.keep_groups = []
-        for name in axes:
-            # check for a pseudo-name of the form keep__<name1>__<name2>__...
-            tokens = name.split("__")
-            if len(tokens) >= 3 and tokens[0] == "keep":
-                group = {}
-                for tname in tokens[1:]:
-                    try:
-                        idx = self.names.index(tname)
-                    except ValueError:
-                        raise ValueError(f'Unknown name "{tname}" in {name}')
-                    # Make a copy of the original axis since we will be modifying it.
-                    group[tname] = np.array(self.axes[tname])
-                # Build a dictionary with keys name1, name2, ... and corresponding values for a fully populated mesh grid.
-                full_group = dict(
-                    zip(
-                        group.keys(),
-                        np.stack(
-                            [
-                                G
-                                for G in np.meshgrid(
-                                    *group.values(),
-                                    sparse=False,
-                                    copy=True,
-                                    indexing="ij",
-                                )
-                            ]
-                        ).reshape(len(group), -1),
-                    )
-                )
-                # Use the provided function to filter each array to just those combinations we should keep.
-                try:
-                    keep = axes[name](**full_group)
-                    keep_group = {
-                        tname: axis[keep] for tname, axis in full_group.items()
-                    }
-                except Exception as e:
-                    raise RuntimeError(f"{name} filter failed: {e}")
-                # Remember the original axes for this group.
-                self.keep_groups.append(group)
-                # Replace original unfiltered axes in this group.
-                offset = None
-                for tname, axis in keep_group.items():
-                    # Replace original axis definition
-                    self.axes[tname] = axis
-                    idx = self.names.index(tname)
-                    if offset is None:
-                        offset = self.offsets[idx]
-                    else:
-                        self.offsets[idx] = offset
-                continue
-            # treat this like a new named axis
+        naxes = len(axes)
+        for offset, name in enumerate(axes):
+            # Check for a valid axis definition
             axis = np.atleast_1d(axes[name])
             if axis.ndim != 1:
                 raise RuntimeError(f'Invalid grid for axis "{name}"')
-            self.offsets.append(len(self.axes))
-            self.axes[name] = axis
-            self.names.append(name)
-        # Offset each axis for broadcasting
-        naxes = len(self.names)
-        bcast = 1
-        for i, (name, axis) in enumerate(self.axes.items()):
-            self.axes[name] = axis.reshape([-1] + [1] * (naxes - self.offsets[i] - 1))
-            bcast = bcast * self.axes[name]
-        self.shape = bcast.shape
+            # Store the axis offset to its position in the grid
+            shape = [1] * offset + [-1] + [1] * (naxes - offset - 1)
+            self.axes[name] = axis.reshape(shape)
+        self.names = tuple(self.axes.keys())
+        self.shape = list([axis.size for axis in self.axes.values()])
+        self.expanded_shape = tuple(self.shape)
+        # Check for a constraint function
+        if constraint is not None:
+            if not inspect.isfunction(constraint):
+                raise ValueError("constraint must be a callable function")
+            constraint_names = list(inspect.signature(constraint).parameters.keys())
+            for name in constraint_names:
+                if name not in self.names:
+                    raise ValueError("constraint uses an invalid axis name: " + name)
+            # Evaluate the constraint function on the full grid
+            self.constraint_args = {name: self.axes[name] for name in constraint_names}
+            constraint_eval = constraint(**self.constraint_args)
+            if np.any(constraint_eval < 0):
+                raise ValueError("constraint must be non-negative")
+            self.constraint_weights = np.ones(self.shape, dtype=np.float32)
+            self.constraint_weights[:] = constraint_eval
+            # Replace the constrained axes with the reduced set of values
+            mapper = dict(zip(constraint_names, np.squeeze(constraint_eval).nonzero()))
+            first_offset = None
+            for offset, name in enumerate(self.names):
+                if name not in constraint_names:
+                    continue
+                if first_offset is None:
+                    first_offset = offset
+                shape = [1] * first_offset + [-1] + [1] * (naxes - first_offset - 1)
+                self.axes[name] = self.axes[name].ravel()[mapper[name]].reshape(shape)
+                self.shape[offset] = (
+                    self.axes[name].size if offset == first_offset else 1
+                )
+        else:
+            self.constraint_weights = 1
+        self.shape = tuple(self.shape)
         # Initialize data used to implement GridStack
         self._stack_offset = 0
         self._stack_pad = 0
+
+    def expand(self, values):
+        """Expand an array of values to the full grid shape.
+        Any values removed by a constraint will be set to NaN.
+        """
+        if values.shape != self.shape:
+            raise ValueError(
+                f"values shape {values.shape} does not match grid shape {self.shape}"
+            )
+        if self.expanded_shape == self.shape:
+            return values
+        expanded = np.full(self.expanded_shape, np.nan)
+        indices = self.constraint_weights.nonzero()
+        expanded[indices] = values.ravel()
+        return expanded
 
     def __str__(self):
         return "[" + ",".join(self.names) + "]"
@@ -107,7 +98,7 @@ class Grid:
             idx = self.names.index(name)
         except ValueError:
             raise ValueError(f'"{name}" is not in the grid')
-        return self.offsets[idx] + self._stack_offset
+        return idx + self._stack_offset
 
     def sum(self, values, keepdims=False, axis_names=None):
         """Sum values over our grid.
