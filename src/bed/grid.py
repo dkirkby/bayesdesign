@@ -55,21 +55,6 @@ class Grid:
         self._stack_offset = 0
         self._stack_pad = 0
 
-    def expand(self, values):
-        """Expand an array of values to the full grid shape.
-        Any values removed by a constraint will be set to NaN.
-        """
-        if values.shape != self.shape:
-            raise ValueError(
-                f"values shape {values.shape} does not match grid shape {self.shape}"
-            )
-        if self.expanded_shape == self.shape:
-            return values
-        expanded = np.full(self.expanded_shape, np.nan)
-        indices = self.constraint_weights.nonzero()
-        expanded[indices] = values.ravel()
-        return expanded
-
     def __str__(self):
         return "[" + ",".join(self.names) + "]"
 
@@ -90,8 +75,23 @@ class Grid:
         axis = self.axes[name]
         return axis.reshape(axis.shape + tuple([1] * self._stack_pad))
 
+    def expand(self, values):
+        """Expand an array of values to the full grid shape.
+        Any values removed by a constraint will be set to NaN.
+        """
+        if values.shape != self.shape:
+            raise ValueError(
+                f"values shape {values.shape} does not match grid shape {self.shape}"
+            )
+        if self.expanded_shape == self.shape:
+            return values
+        expanded = np.full(self.expanded_shape, np.nan)
+        indices = self.constraint_weights.nonzero()
+        expanded[indices] = values.ravel()
+        return expanded
+
     def axis(self, name):
-        """Return the index of the named axis. Axes in the same keep group will have the same index.
+        """Return the index of the named axis.
         Used to implement our index() method.
         """
         try:
@@ -103,8 +103,6 @@ class Grid:
     def sum(self, values, keepdims=False, axis_names=None):
         """Sum values over our grid.
         Used for marginalization and to implement our normalize() method.
-        Note that if axis_names uses a subset of a keep_group you will probably not get the result you want.
-        TODO: detect and error on this condition.
         """
         # Use all axes by default
         axis_names = axis_names or self.names
@@ -114,6 +112,13 @@ class Grid:
             )
         except ValueError:
             raise ValueError(f"Invalid axis_names: {axis_names}")
+        if self.shape != self.expanded_shape:
+            # Multiply by constraint weights
+            mask = self.constraint_weights != 0
+            weights = self.constraint_weights[mask].reshape(
+                self.shape + (1,) * self._stack_offset
+            )
+            values = values * weights
         return np.sum(values, axis=axes, keepdims=keepdims)
 
     def normalize(self, values):
@@ -132,7 +137,7 @@ class Grid:
     def index(self, name, value):
         """Return the index of the named axis and the location along that axis that is closest
         to the specified value.
-        Used to implement GridStack.at()
+        Used to implement our sum() method and GridStack.at()
         """
         axis = self.axis(name)
         deltas = value - self.axes[name]
