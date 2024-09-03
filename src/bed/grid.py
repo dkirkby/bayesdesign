@@ -20,6 +20,7 @@ class Grid:
         self.names = tuple(self.axes.keys())
         self.shape = list([axis.size for axis in self.axes.values()])
         self.expanded_shape = tuple(self.shape)
+        self.constraint = constraint
         # Check for a constraint function
         if constraint is not None:
             if not inspect.isfunction(constraint):
@@ -33,8 +34,8 @@ class Grid:
             constraint_eval = constraint(**self.constraint_args)
             if np.any(constraint_eval < 0):
                 raise ValueError("constraint must be non-negative")
-            self.constraint_weights = np.ones(self.shape, dtype=np.float32)
-            self.constraint_weights[:] = constraint_eval
+            ##self.constraint_weights = np.ones(self.shape, dtype=np.float32)
+            ##self.constraint_weights[:] = constraint_eval
             # Replace the constrained axes with the reduced set of values
             mapper = dict(zip(constraint_names, np.squeeze(constraint_eval).nonzero()))
             first_offset = None
@@ -48,8 +49,9 @@ class Grid:
                 self.shape[offset] = (
                     self.axes[name].size if offset == first_offset else 1
                 )
-        else:
-            self.constraint_weights = 1
+            mask = constraint_eval != 0
+            shape = tuple([1] * first_offset + [-1] + [1] * (naxes - first_offset - 1))
+            self.constraint_weights = constraint_eval[mask].ravel().reshape(shape)
         self.shape = tuple(self.shape)
         # Initialize data used to implement GridStack
         self._stack_offset = 0
@@ -83,7 +85,7 @@ class Grid:
             raise ValueError(
                 f"values shape {values.shape} does not match grid shape {self.shape}"
             )
-        if self.expanded_shape == self.shape:
+        if self.constraint is None:
             return values
         expanded = np.full(self.expanded_shape, np.nan)
         indices = self.constraint_weights.nonzero()
@@ -104,21 +106,25 @@ class Grid:
         """Sum values over our grid.
         Used for marginalization and to implement our normalize() method.
         """
-        # Use all axes by default
-        axis_names = axis_names or self.names
+        if values.shape != self.shape:
+            raise ValueError(
+                f"values shape {values.shape} does not match grid shape {self.shape}"
+            )
+        if axis_names is None:
+            # Use all axes by default
+            if self.constraint is not None:
+                # Multiply by constraint weights. Avoid *= so we don't modify the input.
+                values = values * self.constraint_weights
+            return np.sum(values, keepdims=keepdims)
+        # Check for valid axis names
+        if self.constraint is not None:
+            raise NotImplementedError("sum() with axis_names and constraint")
         try:
             axes = tuple(
                 [self.names.index(name) + self._stack_offset for name in axis_names]
             )
         except ValueError:
             raise ValueError(f"Invalid axis_names: {axis_names}")
-        if self.shape != self.expanded_shape:
-            # Multiply by constraint weights
-            mask = self.constraint_weights != 0
-            weights = self.constraint_weights[mask].reshape(
-                self.shape + (1,) * self._stack_offset
-            )
-            values = values * weights
         return np.sum(values, axis=axes, keepdims=keepdims)
 
     def normalize(self, values):
