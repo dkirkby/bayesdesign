@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from bed.grid import Grid, GridStack
+from bed.grid import Grid, GridStack, PermutationInvariant
 
 
 class TestGrid(unittest.TestCase):
@@ -69,16 +69,70 @@ class TestGrid(unittest.TestCase):
             u=[4, 5],
             y=1,
             v=[6, 7, 8, 9],
-            constraint=lambda u, v: (u + v) % 2,
+            constraint=lambda u, v: (u + v) % 2 == 1,
         )
         z1 = g1.x * ((g1.u + g1.v) % 2) ** g1.y
         z2 = g2.x * ((g2.u + g2.v) % 2) ** g2.y
-        assert g1.sum(z1) == g2.sum(z2)
+        self.assertEqual(g1.sum(z1), g2.sum(z2))
+
+    def test_sum_permutation_invariant_2d(self):
+        g1 = Grid(u=2, x=[1, 2, 3], y=[1, 2], z=[1, 2, 3])
+        z1 = (g1.x + g1.z) * g1.y + g1.u
+        g2 = Grid(
+            u=2,
+            x=[1, 2, 3],
+            y=[1, 2],
+            z=[1, 2, 3],
+            constraint=lambda x, z: PermutationInvariant(x, z),
+        )
+        z2 = (g2.x + g2.z) * g2.y + g2.u
+        self.assertEqual(g1.sum(z1), g2.sum(z2))
+
+    def test_sum_permutation_invariant_3d(self):
+        g1 = Grid(u=[1, 2], x=[1, 2, 3], y=[1, 2, 3], z=[1, 2, 3])
+        z1 = (g1.x + g1.y + g1.z) * g1.u
+        g2 = Grid(
+            u=[1, 2],
+            x=[1, 2, 3],
+            y=[1, 2, 3],
+            z=[1, 2, 3],
+            constraint=lambda x, y, z: PermutationInvariant(x, y, z),
+        )
+        z2 = (g2.x + g2.y + g2.z) * g2.u
+        self.assertEqual(g1.sum(z1), g2.sum(z2))
 
     def test_sum_invalid(self):
         grid = Grid(x=np.arange(3), y=np.arange(4))
         with self.assertRaises(ValueError):
             grid.sum(np.ones(grid.shape), axis_names=("x", "z"))
+
+
+class TestPermutationInvariant(unittest.TestCase):
+
+    def test_basic_2d(self):
+        x = np.arange(3)
+        pi = PermutationInvariant(x, x.reshape((-1, 1)))
+        self.assertTrue(np.array_equal(pi, np.array([[1, 2, 2], [0, 1, 2], [0, 0, 1]])))
+
+    def test_basic_3d(self):
+        x = np.arange(3)
+        pi = PermutationInvariant(x.reshape((-1, 1, 1)), x.reshape((-1, 1)), x)
+        self.assertTrue(
+            np.array_equal(
+                pi,
+                np.array(
+                    [
+                        [[1.0, 3.0, 3.0], [0.0, 3.0, 6.0], [0.0, 0.0, 3.0]],
+                        [[0.0, 0.0, 0.0], [0.0, 1.0, 3.0], [0.0, 0.0, 3.0]],
+                        [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
+                    ]
+                ),
+            )
+        )
+
+    def test_invalid_axes(self):
+        with self.assertRaises(ValueError):
+            PermutationInvariant(np.array([1, 2, 3]), np.array([1, 2]))
 
 
 class TestGridStack(unittest.TestCase):
