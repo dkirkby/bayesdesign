@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file. The format 
 - Instructions on starting work on next version added to CONTRIBUTING.md
 - Notebook to demonstrate grid constraints (see [issue#1](https://github.com/dkirkby/bayesdesign/issues/1))
 - Section on optimal second measurement in sine wave example notebook
+- grid.PermutationInvariant helper function to calculate constraint weights
 
 ### Fixed
 

@@ -151,6 +151,37 @@ class Grid:
         return (axis, idx)
 
 
+def PermutationInvariant(*args):
+    """Evluates constraint weights that impose permutation invariance on the grid axes passed as arguments."""
+    nvars = len(args)
+    arg0 = args[0].ravel()
+    for i in range(1, nvars):
+        if not np.array_equal(args[i].ravel(), arg0):
+            raise ValueError("All axes must be identical for permutation invariance")
+    size = arg0.size
+    shape = np.broadcast(*args).shape
+    indices = np.arange(size)
+    M = np.stack(np.meshgrid(*[indices] * nvars, indexing="ij"), axis=-1).reshape(
+        -1, nvars
+    )
+    nfact = np.math.factorial(nvars)
+
+    def nperm(row):
+        nrun = 1
+        denom = 1
+        for i in range(1, nvars):
+            if row[i] < row[i - 1]:
+                return 0
+            elif row[i] == row[i - 1]:
+                nrun += 1
+            else:
+                nrun = 1
+            denom *= nrun
+        return nfact / denom
+
+    return np.array([nperm(row) for row in M]).reshape(shape)
+
+
 class GridStack:
     """A context manager to allow grids to be temporarily stacked together to create a larger grid."""
 
