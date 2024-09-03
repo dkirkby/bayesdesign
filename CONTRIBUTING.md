@@ -8,11 +8,25 @@ If there is not already a relevant [open issue](https://github.com/dkirkby/bayes
 
 ## Developer Tasks
 
+### Development Environment
+
+Required development packages are `tox`, `pytest` and `black`.
+
 ### Configure VScode
+
+Run `black` code formatter on save.
 
 ### Run unit tests locally
 
+Use the flask sidebar icon in VScode or run `tox -e py` from the command line in the top-level directory.
+
 ### Change the matrix of test configurations
+
+Edit `python-version` in `.github/workflows/test.yml`
+
+If the range of supported python versions has changed, edit `classifiers` in `setup.py` accordingly.
+
+(What is the role of `envlist` in `tox.ini`??)
 
 ### Release a new version
 
