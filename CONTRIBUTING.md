@@ -24,9 +24,15 @@ Use the flask sidebar icon in VScode or run `tox -e py` from the command line in
 
 Edit `python-version` in `.github/workflows/test.yml`
 
-If the range of supported python versions has changed, edit `classifiers` in `setup.py` accordingly.
+If the range of supported python versions has changed, edit `classifiers` and `python_requires` in `setup.py` accordingly.
 
 (What is the role of `envlist` in `tox.ini`??)
+
+### Add a dependency
+
+Update `requirements.txt`
+
+(What about `install_requires` in `setup.py`??)
 
 ### Release a new version
 
