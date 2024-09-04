@@ -34,24 +34,29 @@ class Grid:
             constraint_eval = constraint(**self.constraint_args)
             if np.any(constraint_eval < 0):
                 raise ValueError("constraint must be non-negative")
-            ##self.constraint_weights = np.ones(self.shape, dtype=np.float32)
-            ##self.constraint_weights[:] = constraint_eval
             # Replace the constrained axes with the reduced set of values
             mapper = dict(zip(constraint_names, np.squeeze(constraint_eval).nonzero()))
-            first_offset = None
+            constraint_offsets = []
             for offset, name in enumerate(self.names):
                 if name not in constraint_names:
                     continue
-                if first_offset is None:
-                    first_offset = offset
-                shape = [1] * first_offset + [-1] + [1] * (naxes - first_offset - 1)
+                if len(constraint_offsets) == 0:
+                    shape = [1] * offset + [-1] + [1] * (naxes - offset - 1)
+                    self.shape[offset] = np.count_nonzero(constraint_eval)
+                else:
+                    self.shape[offset] = 1
                 self.axes[name] = self.axes[name].ravel()[mapper[name]].reshape(shape)
-                self.shape[offset] = (
-                    self.axes[name].size if offset == first_offset else 1
-                )
-            mask = constraint_eval != 0
+                constraint_offsets.append(offset)
+            first_offset = constraint_offsets[0]
             shape = tuple([1] * first_offset + [-1] + [1] * (naxes - first_offset - 1))
+            mask = constraint_eval != 0
             self.constraint_weights = constraint_eval[mask].ravel().reshape(shape)
+            # Compute and save the indices needed to expand an array tabulated on the reduced grid
+            self.constraint_offsets = np.array(constraint_offsets)
+            self.constraint_indices = list(constraint_eval.nonzero())
+            for offset in range(naxes):
+                if offset not in constraint_offsets:
+                    self.constraint_indices[offset] = slice(None)
         self.shape = tuple(self.shape)
         # Initialize data used to implement GridStack
         self._stack_offset = 0
@@ -88,8 +93,14 @@ class Grid:
         if self.constraint is None:
             return values
         expanded = np.full(self.expanded_shape, np.nan)
-        indices = self.constraint_weights.nonzero()
-        expanded[indices] = values.ravel()
+        # This implementation is slow since it does explicit looping
+        axis0 = self.constraint_offsets[0]
+        for ii in np.ndindex(self.shape):
+            i0 = ii[axis0]
+            jj = list(ii)
+            for k in self.constraint_offsets:
+                jj[k] = self.constraint_indices[k][i0]
+            expanded[tuple(jj)] = values[ii]
         return expanded
 
     def axis(self, name):
@@ -106,9 +117,13 @@ class Grid:
         """Sum values over our grid.
         Used for marginalization and to implement our normalize() method.
         """
-        if values.shape != self.shape:
+        values = np.asarray(values)
+        sum_shape = values.shape[
+            self._stack_offset : self._stack_offset + len(self.shape)
+        ]
+        if sum_shape != self.shape:
             raise ValueError(
-                f"values shape {values.shape} does not match grid shape {self.shape}"
+                f"values shape {values.shape} is not compatible with grid shape {self.shape}"
             )
         if axis_names is None:
             # Use all axes by default
