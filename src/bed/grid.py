@@ -118,19 +118,20 @@ class Grid:
         Used for marginalization and to implement our normalize() method.
         """
         values = np.asarray(values)
-        sum_shape = values.shape[
-            self._stack_offset : self._stack_offset + len(self.shape)
-        ]
+        axis1 = self._stack_offset
+        axis2 = axis1 + len(self.shape)
+        sum_shape = values.shape[axis1:axis2]
         if sum_shape != self.shape:
             raise ValueError(
                 f"values shape {values.shape} is not compatible with grid shape {self.shape}"
             )
         if axis_names is None:
             # Use all axes by default
+            axes = tuple(range(axis1, axis2))
             if self.constraint is not None:
                 # Multiply by constraint weights. Avoid *= so we don't modify the input.
                 values = values * self.constraint_weights
-            return np.sum(values, keepdims=keepdims)
+            return np.sum(values, axis=axes, keepdims=keepdims)
         # Check for valid axis names
         if self.constraint is not None:
             raise NotImplementedError("sum() with axis_names and constraint")
