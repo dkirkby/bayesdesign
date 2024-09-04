@@ -1,52 +1,40 @@
 import setuptools
 
-with open('README.md', 'r', encoding='utf-8') as fh:
+with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
 setuptools.setup(
-    name='bayesdesign',
-    author='David Kirkby',
-    author_email='dkirkby@uci.edu',
-    description='Package for Bayesian optimal experimental design',
-    keywords='bayes,optimization',
+    name="bayesdesign",
+    author="David Kirkby",
+    author_email="dkirkby@uci.edu",
+    description="Package for Bayesian optimal experimental design",
+    keywords="bayes,optimization",
     long_description=long_description,
-    long_description_content_type='text/markdown',
-    url='https://github.com/dkirkby/bayesdesign',
+    long_description_content_type="text/markdown",
+    url="https://github.com/dkirkby/bayesdesign",
     project_urls={
-        'Documentation': 'https://github.com/dkirkby/bayesdesign',
-        'Bug Reports':
-        'https://github.com/dkirkby/bayesdesign/issues',
-        'Source Code': 'https://github.com/dkirkby/bayesdesign',
+        "Documentation": "https://github.com/dkirkby/bayesdesign",
+        "Bug Reports": "https://github.com/dkirkby/bayesdesign/issues",
+        "Source Code": "https://github.com/dkirkby/bayesdesign",
         # 'Funding': '',
         # 'Say Thanks!': '',
     },
-    package_dir={'': 'src'},
-    packages=setuptools.find_packages(where='src'),
+    package_dir={"": "src"},
+    packages=setuptools.find_packages(where="src"),
     classifiers=[
         # see https://pypi.org/classifiers/
-        'Development Status :: 4 - Beta',
-
-        'Intended Audience :: Science/Research',
-        'Topic :: Scientific/Engineering :: Astronomy',
-
-        'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.6',
-        'Programming Language :: Python :: 3.7',
-        'Programming Language :: Python :: 3.8',
-        'Programming Language :: Python :: 3.9',
-        'Programming Language :: Python :: 3.10',
-        'Programming Language :: Python :: 3.11',
-        'Programming Language :: Python :: 3.12',
-        'Programming Language :: Python :: 3.13',
-        'Programming Language :: Python :: 3.14',
-        'Programming Language :: Python :: 3 :: Only',
-        'License :: OSI Approved :: MIT License',
-        'Operating System :: OS Independent',
+        "Development Status :: 4 - Beta",
+        "Intended Audience :: Science/Research",
+        "Topic :: Scientific/Engineering :: Astronomy",
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3 :: Only",
+        "License :: OSI Approved :: MIT License",
+        "Operating System :: OS Independent",
     ],
-    python_requires='>=3.6',
+    python_requires=">=3.6",
     # install_requires=['Pillow'],
     extras_require={
-        'dev': ['check-manifest'],
+        "dev": ["check-manifest"],
         # 'test': ['coverage'],
     },
     # entry_points={
