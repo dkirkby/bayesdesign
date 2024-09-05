@@ -1,6 +1,8 @@
 """Utility functions for working with discrete grids of variables."""
 
 import inspect
+import math
+
 import numpy as np
 
 
@@ -180,7 +182,7 @@ def PermutationInvariant(*args):
     M = np.stack(np.meshgrid(*[indices] * nvars, indexing="ij"), axis=-1).reshape(
         -1, nvars
     )
-    nfact = np.math.factorial(nvars)
+    nfact = math.factorial(nvars)
 
     def nperm(row):
         nrun = 1
