@@ -59,9 +59,11 @@ class ExperimentDesigner:
             Note that this uses more memory and will take longer.
         """
         self.prior = prior
-        assert np.allclose(self.prior.sum(), 1)
+        if not np.allclose(self.parameters.sum(self.prior), 1):
+            raise ValueError("Prior probabilities must sum to 1")
         # Calculate prior entropy in bits
         self.H0 = -self.parameters.sum(prior * np.log2(prior))
+
         with GridStack(self.features, self.designs, self.parameters):
 
             # Tabulate the marginal probability P(y|xi) by integrating P(y|theta,xi) P(theta) over theta.
