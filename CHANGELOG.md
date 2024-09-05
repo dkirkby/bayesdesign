@@ -6,7 +6,7 @@ This is the log of changes to the [bayesdesign package](https://github.com/dkirk
 
 All notable changes to this project will be documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.0] - Unreleased
+## [0.3.0] - 2024-09-05
 
 ### Added
 
@@ -14,6 +14,11 @@ All notable changes to this project will be documented in this file. The format 
 - Notebook to demonstrate grid constraints (see [issue#1](https://github.com/dkirkby/bayesdesign/issues/1))
 - Section on optimal second measurement in sine wave example notebook
 - grid.PermutationInvariant helper function to calculate constraint weights
+- expand() and getmax() methods to grid.Grid
+
+### Changed
+
+- design.ExperimentDesigner.calculateEIG now returns a dict of best design values
 
 ### Fixed
 
