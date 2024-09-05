@@ -33,7 +33,7 @@ class TestGrid(unittest.TestCase):
         with self.assertRaises(ValueError):
             Grid(x=[1, 2, 3], y=[4, 5], z=[6, 7, 8], constraint=lambda a, b: a < b)
 
-    def test_expand(self):
+    def test_expand_2d(self):
         g1 = Grid(x=[1, 2, 3], u=[4, 5], y=1, v=[6, 7, 8, 9])
         g2 = Grid(
             x=[1, 2, 3],
@@ -47,9 +47,26 @@ class TestGrid(unittest.TestCase):
         z1e = g1.expand(z1)
         z2e = g2.expand(z2)
         assert z1e is z1
-        nonzero = z1 != 0
+        nonzero = ~np.isnan(z2e)
         assert np.array_equal(z1[nonzero], z2e[nonzero])
-        assert np.all(np.isnan(z2e[~nonzero]))
+
+    def test_expand_3d(self):
+        g1 = Grid(x=[1, 2, 3], u=2, y=[1, 2, 3], v=[1, 2], z=[1, 2, 3])
+        z1 = (g1.x + g1.y + g1.z) * g1.u + g1.v
+        g2 = Grid(
+            x=[1, 2, 3],
+            u=2,
+            y=[1, 2, 3],
+            v=[1, 2],
+            z=[1, 2, 3],
+            constraint=lambda x, y, z: PermutationInvariant(x, y, z),
+        )
+        z2 = (g2.x + g2.y + g2.z) * g2.u + g2.v
+        z1e = g1.expand(z1)
+        z2e = g2.expand(z2)
+        assert z1e is z1
+        nonzero = ~np.isnan(z2e)
+        assert np.array_equal(z1[nonzero], z2e[nonzero])
 
     def test_sum(self):
         grid = Grid(x=np.arange(3), y=np.arange(4))
