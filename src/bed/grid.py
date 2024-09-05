@@ -168,6 +168,20 @@ class Grid:
         idx = np.argmin(np.abs(deltas))
         return (axis, idx)
 
+    def getmax(self, values):
+        """Return the grid coordinates of the maximum value in the specified array of values defined on this grid."""
+        if values.shape != self.shape:
+            raise ValueError("values must have the same shape as the grid")
+        indices = list(np.unravel_index(np.argmax(values), values.shape))
+        if self.constraint is not None:
+            k0 = self.constraint_offsets[0]
+            for k in self.constraint_offsets[1:]:
+                indices[k] = indices[k0]
+        return {
+            name: self.axes[name].ravel()[indices[k]]
+            for k, name in enumerate(self.names)
+        }
+
 
 def PermutationInvariant(*args):
     """Evluates constraint weights that impose permutation invariance on the grid axes passed as arguments."""

@@ -29,7 +29,9 @@ class TestDesign(unittest.TestCase):
         params.normalize(prior)
         self.assertAlmostEqual(prior.sum(), 1)
 
-        designer.calculateEIG(prior)
+        best = designer.calculateEIG(prior)
+
+        self.assertEqual(best["t_obs"], 3.5)
         self.assertEqual(designer.posterior.shape, likelihood.shape)
         self.assertEqual(designer.marginal.shape, (100, 51))
         self.assertEqual(designer.IG.shape, (100, 51))

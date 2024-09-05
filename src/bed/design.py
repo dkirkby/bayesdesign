@@ -57,6 +57,11 @@ class ExperimentDesigner:
         debug : bool
             Cross-checked buffer calculations against simpler expressions.
             Note that this uses more memory and will take longer.
+
+        Returns
+        -------
+        dict of design variable names and corresponding values where the calculated
+        EIG is maximized.
         """
         self.prior = prior
         if not np.allclose(self.parameters.sum(self.prior), 1):
@@ -101,8 +106,9 @@ class ExperimentDesigner:
         with GridStack(self.features, self.designs):
             # Tabulate the expected information gain in bits as avg of IG(y,xi) with weights P(y|xi).
             self.EIG = self.features.sum(self.marginal * self.IG)
+
         self._initialized = True
-        return self.EIG
+        return self.designs.getmax(self.EIG)
 
     def calculateMarginalEIG(self, *nuisance_params):
         """Calculate the EIG using a posterior that is marginalized over the specified nuisance parameters."""
