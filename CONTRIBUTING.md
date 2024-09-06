@@ -8,6 +8,8 @@ If there is not already a relevant [open issue](https://github.com/dkirkby/bayes
 
 ## Developer Tasks
 
+This package was initially generated from [this template](https://github.com/tomchen/example_pypi_package) so refer there for more details on how to work with VS code, set python testing versions, etc.
+
 ### Development Environment
 
 Required development packages are `tox`, `pytest` and `black`.
@@ -26,7 +28,7 @@ Edit `python-version` in `.github/workflows/test.yml`
 
 If the range of supported python versions has changed, edit `classifiers` and `python_requires` in `setup.py` accordingly.
 
-(What is the role of `envlist` in `tox.ini`??)
+Note that `envlist` in `tox.ini` is ignored when running `tox -e ...`
 
 ### Add a dependency
 

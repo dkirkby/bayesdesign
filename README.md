@@ -30,4 +30,16 @@ plt.plot(designs.t_obs, designer.EIG)
 
 Browse the [examples folder](https://github.com/dkirkby/bayesdesign/) to learn more about using this package.
 
-This package was generated from [this template](https://github.com/tomchen/example_pypi_package) so refer there for details on how to work with VS code, set python testing versions, etc.
+## Installation
+
+Install the [latest released version](https://github.com/dkirkby/bayesdesign/releases/latest) from [pypi](https://pypi.org/project/bayesdesign/) using:
+```
+pip install bayesdesign
+```
+The only required dependency is numpy. The optional plot module also requires matplotlib.
+
+The changes with each version are documented [here](CHANGELOG.md).
+
+## Contributing
+
+If you have feedback or would like to contribute to this package, please see our [contributor's guide](CONTRIBUTING.md).
