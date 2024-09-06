@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from bed.grid import Grid, GridStack, PermutationInvariant
+from bed.grid import Grid, GridStack, PermutationInvariant, CosineBump
 
 
 class TestGrid(unittest.TestCase):
@@ -150,6 +150,15 @@ class TestPermutationInvariant(unittest.TestCase):
     def test_invalid_axes(self):
         with self.assertRaises(ValueError):
             PermutationInvariant(np.array([1, 2, 3]), np.array([1, 2]))
+
+
+class TestCosineBump(unittest.TestCase):
+
+    def test_basic(self):
+        y = CosineBump(np.linspace(-4, 7, 100).reshape(1, -1, 1)).squeeze()
+        self.assertEqual(y[0], 0)
+        self.assertEqual(y[-1], 0)
+        self.assertTrue(np.allclose(np.sum(y), 1))
 
 
 class TestGridStack(unittest.TestCase):

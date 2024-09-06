@@ -214,6 +214,18 @@ def PermutationInvariant(*args):
     return np.array([nperm(row) for row in M]).reshape(shape)
 
 
+def CosineBump(x):
+    """Convenience function to define a prior that is centrally peaked and cosine-shaped."""
+    x = np.asarray(x)
+    if not np.all(np.diff(x) > 0):
+        raise ValueError("x must be monotonically increasing")
+    xlo, xhi = np.min(x), np.max(x)
+    t = 2 * np.pi * ((x - xlo) / (xhi - xlo) - 0.5)
+    y = 1 + np.cos(t)
+    y /= np.sum(y)
+    return y
+
+
 class GridStack:
     """A context manager to allow grids to be temporarily stacked together to create a larger grid."""
 
