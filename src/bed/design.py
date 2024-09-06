@@ -66,8 +66,9 @@ class ExperimentDesigner:
         self.prior = prior
         if not np.allclose(self.parameters.sum(self.prior), 1):
             raise ValueError("Prior probabilities must sum to 1")
-        # Calculate prior entropy in bits
-        self.H0 = -self.parameters.sum(prior * np.log2(prior))
+        # Calculate prior entropy in bits (careful with x log x = 0 for x=0).
+        log2prior = np.log2(prior, out=np.zeros_like(prior), where=prior > 0)
+        self.H0 = -self.parameters.sum(prior * log2prior)
 
         with GridStack(self.features, self.designs, self.parameters):
 
@@ -89,13 +90,16 @@ class ExperimentDesigner:
 
             # Tabulate the information gain in bits IG = post * log2(post) + H0.
             # Do the calculations in stages to avoid allocating any large temporary arrays.
-            np.log2(self._buffer, out=self._buffer)
+            np.log2(self._buffer, out=self._buffer, where=self._buffer > 0)
             self._buffer *= self.likelihood
             self._buffer *= self.prior
             self._buffer /= post_norm
             self.IG = self.H0 + self.parameters.sum(self._buffer)
             if debug:
-                IG = self.H0 + self.parameters.sum(posterior * np.log2(posterior))
+                log2posterior = np.log2(
+                    posterior, out=np.zeros_like(posterior), where=posterior > 0
+                )
+                IG = self.H0 + self.parameters.sum(posterior * log2posterior)
                 assert np.allclose(IG, self.IG), "IG check failed"
 
             # Leave the posterior in the buffer.
@@ -118,14 +122,16 @@ class ExperimentDesigner:
         prior = self.parameters.sum(
             self.prior, axis_names=nuisance_params, keepdims=True
         )
-        H0 = -self.parameters.sum(prior * np.log2(prior))
+        log2prior = np.log2(prior, out=np.zeros_like(prior), where=prior > 0)
+        H0 = -self.parameters.sum(prior * log2prior)
         # Calculate the marginal posterior and the information gain.
         with GridStack(self.features, self.designs, self.parameters):
             post = self.parameters.sum(
                 self.posterior, axis_names=nuisance_params, keepdims=True
             )
             # Calculate the information gain for all possible designs and measurements
-            IG = H0 + self.parameters.sum(post * np.log2(post))
+            log2post = np.log2(post, out=np.zeros_like(post), where=post > 0)
+            IG = H0 + self.parameters.sum(post * log2post)
             # Tabulate the expected information gain in bits.
             EIG = self.features.sum(self.marginal * IG)
         return EIG
