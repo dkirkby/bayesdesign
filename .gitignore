@@ -1,3 +1,6 @@
+# Development and test notebook
+examples/dev.ipynb
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
