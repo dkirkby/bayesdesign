@@ -214,6 +214,16 @@ def PermutationInvariant(*args):
     return np.array([nperm(row) for row in M]).reshape(shape)
 
 
+def TopHat(x):
+    """Helper function to define a prior that is flat within its extent."""
+    x = np.asarray(x)
+    if not np.all(np.diff(x) > 0):
+        raise ValueError("x must be monotonically increasing")
+    y = np.ones_like(x)
+    y /= np.sum(y)
+    return y
+
+
 def CosineBump(x):
     """Convenience function to define a prior that is centrally peaked and cosine-shaped."""
     x = np.asarray(x)
