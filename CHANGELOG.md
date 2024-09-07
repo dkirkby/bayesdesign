@@ -8,6 +8,16 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [0.4.0] - Unreleased
 
+### Added
+
+- TopHat and CosineBump helper functions for building priors
+- plot.cornerPlot to visualize multi-dimensional arrays defined on a Grid
+- MultiParameter example notebook
+
+### Fixed
+
+- Handling of p=0 in p*log2(p) for entropy calculations
+
 ## [0.3.0] - 2024-09-05
 
 ### Added
