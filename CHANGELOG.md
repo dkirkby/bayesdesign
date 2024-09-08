@@ -14,6 +14,12 @@ All notable changes to this project will be documented in this file. The format 
 - plot.cornerPlot to visualize multi-dimensional arrays defined on a Grid
 - MultiParameter example notebook
 
+### Changed
+
+- Add optional arg to set missing value in Grid.expand()
+- Add verbose option to Grid.sum()
+- Allow constraint in Grid.sum()
+
 ### Fixed
 
 - Handling of p=0 in p*log2(p) for entropy calculations
