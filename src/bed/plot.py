@@ -10,9 +10,9 @@ def cornerPlot(data, grid, asize=2.5, hwspace=0.25, cmap="Blues", CL=(0.683, 0.9
     Diagonal plots show the 1D marginal distribution of the data along each axis.
     Off-diagonal plots show the 2D marginal distribution of the data along each pair of axes.
 
-    This function does not currently work with grids that have a constraint applied,
-    until Grid.sum() is implemented to handle the combination of constraints and
-    a partial sum over axes.
+    This function works with a grid that has a constraint applied, but only points that satisfy
+    the constraint are plotted, with the constraint weights applied, and all other points are
+    set to zero. This will distort some or all of the 1D and 2D marginal distributions.
 
     Parameters
     ----------
@@ -53,8 +53,7 @@ def cornerPlot(data, grid, asize=2.5, hwspace=0.25, cmap="Blues", CL=(0.683, 0.9
             raise ValueError("CL values must be increasing")
 
     # Ignore axes with length 1.
-    data = grid.expand(data).squeeze()
-    axes = {name: axis.ravel() for name, axis in grid.axes.items() if axis.size > 1}
+    axes = {name: axis.ravel() for name, axis in grid.axes_in.items() if axis.size > 1}
     naxes = len(axes)
 
     # Initialize the figure.
