@@ -28,6 +28,7 @@ class TestGrid(unittest.TestCase):
         self.assertTrue(
             np.array_equal(grid.y, np.array([[0], [1], [2], [0], [1], [0]]))
         )
+        self.assertTrue(np.array_equal(grid.axes_in["y"], np.arange(4)))
 
     def test_ctor_constraint_invalid(self):
         with self.assertRaises(ValueError):

@@ -10,6 +10,7 @@ class Grid:
 
     def __init__(self, constraint=None, **axes):
         self.axes = {}
+        self.axes_in = {}
         naxes = len(axes)
         for offset, name in enumerate(axes):
             # Check for a valid axis definition
@@ -19,6 +20,8 @@ class Grid:
             # Store the axis offset to its position in the grid
             shape = [1] * offset + [-1] + [1] * (naxes - offset - 1)
             self.axes[name] = axis.reshape(shape)
+            # Remember the original axis definition
+            self.axes_in[name] = axis
         self.names = tuple(self.axes.keys())
         self.shape = list([axis.size for axis in self.axes.values()])
         self.expanded_shape = tuple(self.shape)
@@ -84,9 +87,10 @@ class Grid:
         axis = self.axes[name]
         return axis.reshape(axis.shape + tuple([1] * self._stack_pad))
 
-    def expand(self, values):
+    def expand(self, values, missing=np.nan):
         """Expand an array of values to the full grid shape.
-        Any values removed by a constraint will be set to NaN.
+        Any values removed by a constraint will be set to NaN, by default,
+        or to the specified missing value.
         """
         if values.shape != self.shape:
             raise ValueError(
@@ -94,7 +98,7 @@ class Grid:
             )
         if self.constraint is None:
             return values
-        expanded = np.full(self.expanded_shape, np.nan)
+        expanded = np.full(self.expanded_shape, missing)
         # This implementation is slow since it does explicit looping
         axis0 = self.constraint_offsets[0]
         for ii in np.ndindex(self.shape):
@@ -115,7 +119,7 @@ class Grid:
             raise ValueError(f'"{name}" is not in the grid')
         return idx + self._stack_offset
 
-    def sum(self, values, keepdims=False, axis_names=None):
+    def sum(self, values, keepdims=False, axis_names=None, verbose=False):
         """Sum values over our grid.
         Used for marginalization and to implement our normalize() method.
         """
@@ -133,16 +137,26 @@ class Grid:
             if self.constraint is not None:
                 # Multiply by constraint weights. Avoid *= so we don't modify the input.
                 values = values * self.constraint_weights
-            return np.sum(values, axis=axes, keepdims=keepdims)
-        # Check for valid axis names
-        if self.constraint is not None:
-            raise NotImplementedError("sum() with axis_names and constraint")
-        try:
-            axes = tuple(
-                [self.names.index(name) + self._stack_offset for name in axis_names]
-            )
-        except ValueError:
-            raise ValueError(f"Invalid axis_names: {axis_names}")
+        else:
+            # Check for valid axis names
+            try:
+                axes = tuple(
+                    [self.names.index(name) + self._stack_offset for name in axis_names]
+                )
+            except ValueError:
+                raise ValueError(f"Invalid axis_names: {axis_names}")
+            if self.constraint is not None:
+                if values.shape != self.shape:
+                    raise NotImplementedError(
+                        "sum() with axis_names, constraint and GridStack not implemented"
+                    )
+                # Multiply by constraint weights. Avoid *= so we don't modify the input.
+                values = values * self.constraint_weights
+                # Expand the weighted values
+                values = self.expand(values, missing=0.0)
+
+        if verbose:
+            print(f"sum: shape={values.shape} axes={axes}, keepdims={keepdims}")
         return np.sum(values, axis=axes, keepdims=keepdims)
 
     def normalize(self, values):
