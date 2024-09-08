@@ -10,6 +10,10 @@ def cornerPlot(data, grid, asize=2.5, hwspace=0.25, cmap="Blues", CL=(0.683, 0.9
     Diagonal plots show the 1D marginal distribution of the data along each axis.
     Off-diagonal plots show the 2D marginal distribution of the data along each pair of axes.
 
+    This function does not currently work with grids that have a constraint applied,
+    until Grid.sum() is implemented to handle the combination of constraints and
+    a partial sum over axes.
+
     Parameters
     ----------
     data : ndarray
@@ -38,13 +42,18 @@ def cornerPlot(data, grid, asize=2.5, hwspace=0.25, cmap="Blues", CL=(0.683, 0.9
     if not isinstance(grid, Grid):
         raise ValueError("grid must be an instance of Grid")
 
-    if not np.all(np.asarray(CL) > 0):
-        raise ValueError("CL values must all be positive")
-    if not np.all(np.diff(CL) > 0):
-        raise ValueError("CL values must be increasing")
+    if CL is not None:
+        if not np.allclose(grid.sum(data), 1):
+            raise ValueError(
+                "Data must be normalized for CL contours. Try setting CL=None."
+            )
+        if not np.all(np.asarray(CL) > 0):
+            raise ValueError("CL values must all be positive")
+        if not np.all(np.diff(CL) > 0):
+            raise ValueError("CL values must be increasing")
 
     # Ignore axes with length 1.
-    data = data.squeeze()
+    data = grid.expand(data).squeeze()
     axes = {name: axis.ravel() for name, axis in grid.axes.items() if axis.size > 1}
     naxes = len(axes)
 
@@ -66,8 +75,10 @@ def cornerPlot(data, grid, asize=2.5, hwspace=0.25, cmap="Blues", CL=(0.683, 0.9
             ax.set(xlim=cextent)
             if row != col:
                 ax.set(ylim=rextent)
-                axlist = tuple([k for k in range(naxes) if k not in (row, col)])
-                data2d = np.sum(data, axis=axlist).T
+                axlist = tuple(
+                    [name for k, name in enumerate(axes) if k not in (row, col)]
+                )
+                data2d = grid.sum(data, axis_names=axlist).T
                 vmax = 1.5 * data2d.max()
                 ax.imshow(
                     data2d,
@@ -95,11 +106,10 @@ def cornerPlot(data, grid, asize=2.5, hwspace=0.25, cmap="Blues", CL=(0.683, 0.9
                         linestyles=("-", "--", ":")[: len(levels)][::-1],
                     )
             else:
-                axlist = tuple([k for k in range(naxes) if k != row])
-                ax.fill_between(
-                    axes[rname], np.sum(data, axis=axlist), ec="none", fc=fc
-                )
-                ax.plot(axes[rname], np.sum(data, axis=axlist), c=ec)
+                axlist = tuple([name for k, name in enumerate(axes) if k != row])
+                data1d = grid.sum(data, axis_names=axlist)
+                ax.fill_between(axes[rname], data1d, ec="none", fc=fc)
+                ax.plot(axes[rname], data1d, c=ec)
                 ax.set(ylim=(0, None), yticks=[])
             if col == 0 and row > 0:
                 ax.set(ylabel=rname)
