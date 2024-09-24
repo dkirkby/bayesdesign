@@ -40,6 +40,13 @@ The only required dependency is numpy. The optional plot module also requires ma
 
 The changes with each version are documented [here](CHANGELOG.md).
 
+## Upgrade
+
+To upgrade your pip-installed package to the [latest released version](https://github.com/dkirkby/bayesdesign/releases/latest) use:
+```
+pip install bayesdesign --upgrade
+```
+
 ## Contributing
 
 If you have feedback or would like to contribute to this package, please see our [contributor's guide](CONTRIBUTING.md).
