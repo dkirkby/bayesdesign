@@ -2,7 +2,7 @@
 
 import inspect
 import math
-
+import itertools
 import numpy as np
 
 
@@ -196,6 +196,32 @@ class Grid:
             for k, name in enumerate(self.names)
         }
 
+    def subgrid(self, frac):
+        """Return a list of grid class objects that is a subgrid of another grid."""
+        
+        # Define a dictionary for keeping track of subgrids identified by their index
+        subgrids = {}
+        if frac < 1:
+            # Get the number of evenly distributed slices within the desired memory requirement
+            num_slices = np.ceil(1/frac)
+            print(f"Creating {num_slices} design subgrids.")
+            # Get cartesian product of slices to iterate over
+            for c in itertools.product(range(int(num_slices) + 1), repeat=len(self.shape)):
+                sub_dict = {}
+                for idx, (name, axis) in zip(c, self.axes.items()):
+                    if num_slices > axis.size:
+                        raise ValueError(f"Memory constraint is too small for axis {name}.")
+                    sub_dict[name] = axis.squeeze()[idx*int(np.ceil(axis.size / num_slices)):(idx + 1)*int(np.ceil(axis.size / num_slices))]
+
+                # Exclude subgrids that are empty in any dimension
+                if any([axis.size == 0 for axis in sub_dict.values()]):
+                    continue
+                subgrid = Grid(**sub_dict)
+                subgrids[c] = subgrid
+        else:
+            # If fractional decrease is greater than 1, no subgrids are necessary
+            subgrids[(0,) * len(self.shape)] = self
+        return subgrids
 
 def PermutationInvariant(*args):
     """Evluates constraint weights that impose permutation invariance on the grid axes passed as arguments."""

@@ -1,12 +1,13 @@
 import numpy as np
 
 from bed.grid import Grid, GridStack
+import psutil
 
 
 class ExperimentDesigner:
     """Brute force calculation of expected information gain using Grids to define the parameters, features, and designs."""
 
-    def __init__(self, parameters, features, designs, likelihood):
+    def __init__(self, parameters, features, designs, likelihood_func, mem=5000):
         """Initialize an experiment designer.
 
         Parameters
@@ -21,22 +22,33 @@ class ExperimentDesigner:
             grid of likelihood probabilities P(D|theta,xi) over the stack
             (parameters, features, designs). Must be normalized over features
             for each point on the (parameters, designs) grid.
+        mem : int
+            memory limit in MB for the size of the likelihood grid
         """
-        if likelihood.shape != features.shape + designs.shape + parameters.shape:
-            raise ValueError(
-                "Likelihood shape not compatible with [features,designs,parameters]"
-            )
         self.parameters = parameters
         self.features = features
         self.designs = designs
-        self.likelihood = likelihood
-        with GridStack(self.features, self.designs, self.parameters):
-            assert np.allclose(self.features.sum(self.likelihood), 1)
+        self.likelihood = likelihood_func
+        # Calculate the memory required for the likelihood without tabulating the whole grid
+        full_grid_bytes = np.prod(parameters.shape) * np.prod(features.shape) * np.prod(designs.shape) * list(parameters.axes.values())[0].itemsize
+        # Calculate fractional decrease in memory required for the design subgrid
+        frac = mem * (1 << 20) / full_grid_bytes
+        self.sub_designs = designs.subgrid(frac)
+
+        with GridStack(features, list(self.sub_designs.values())[0], parameters):
+            sub_array = likelihood_func(features, list(self.sub_designs.values())[0], parameters)
+            assert np.allclose(self.features.sum(sub_array), 1)
+        if sub_array.shape != features.shape + list(self.sub_designs.values())[0].shape + parameters.shape:
+            raise ValueError(
+                "Likelihood shape not compatible with [features,designs,parameters]"
+            )
+            
         # Pre-allocate an internal buffer the same size as the input likelihood
         # that we use to avoid allocating any large arrays in the calculate method.
-        self._buffer = np.zeros_like(likelihood)
-        self.posterior = self._buffer
+        #self._buffer = np.zeros_like(likelihood_func(features, list(self.sub_designs.values())[0], parameters))
+        #self.posterior = self._buffer
         self._initialized = False
+        self.EIG = np.zeros(designs.shape)
 
     def calculateEIG(self, prior, debug=False):
         """Calculate the expected information gain for all possible designs.
@@ -70,46 +82,60 @@ class ExperimentDesigner:
         log2prior = np.log2(prior, out=np.zeros_like(prior), where=prior > 0)
         self.H0 = -self.parameters.sum(prior * log2prior)
 
-        with GridStack(self.features, self.designs, self.parameters):
+        for idxs, design in self.sub_designs.items():
+            with GridStack(self.features, design, self.parameters):
 
-            # Tabulate the marginal probability P(y|xi) by integrating P(y|theta,xi) P(theta) over theta.
-            # No explicit normalization is required since P(y|theta,xi) and P(theta) are already normalized.
-            self._buffer[:] = self.likelihood
-            self._buffer *= self.prior
-            self.marginal = self.parameters.sum(self._buffer)
-            if debug:
-                marginal = self.parameters.sum(self.likelihood * self.prior)
-                assert np.allclose(marginal, self.marginal), "marginal check failed"
+                # Tabulate the marginal probability P(y|xi) by integrating P(y|theta,xi) P(theta) over theta.
+                # No explicit normalization is required since P(y|theta,xi) and P(theta) are already normalized.
+                self._buffer = self.likelihood(self.features, design, self.parameters)
+                self._buffer *= self.prior
+                self.marginal = self.parameters.sum(self._buffer)
+                if debug:
+                    marginal = self.parameters.sum(self.likelihood(self.features, design, self.parameters) * self.prior)
+                    assert np.allclose(marginal, self.marginal), "marginal check failed"
 
-            # Tabulate the posterior P(theta|y,xi) by normalizing P(y|theta,xi) P(theta) over parameters.
-            post_norm = self.parameters.sum(self._buffer, keepdims=True)
-            self._buffer /= post_norm
-            if debug:
-                posterior = self.parameters.normalize(self.likelihood * self.prior)
-                assert np.allclose(posterior, self._buffer), "posterior check failed"
+                # Tabulate the posterior P(theta|y,xi) by normalizing P(y|theta,xi) P(theta) over parameters.
+                post_norm = self.parameters.sum(self._buffer, keepdims=True)
+                self._buffer /= post_norm
+                if debug:
+                    posterior = self.parameters.normalize(self.likelihood(self.features, design, self.parameters) * self.prior)
+                    assert np.allclose(posterior, self._buffer), "posterior check failed"
 
-            # Tabulate the information gain in bits IG = post * log2(post) + H0.
-            # Do the calculations in stages to avoid allocating any large temporary arrays.
-            np.log2(self._buffer, out=self._buffer, where=self._buffer > 0)
-            self._buffer *= self.likelihood
-            self._buffer *= self.prior
-            self._buffer /= post_norm
-            self.IG = self.H0 + self.parameters.sum(self._buffer)
-            if debug:
-                log2posterior = np.log2(
-                    posterior, out=np.zeros_like(posterior), where=posterior > 0
-                )
-                IG = self.H0 + self.parameters.sum(posterior * log2posterior)
-                assert np.allclose(IG, self.IG), "IG check failed"
+                # Tabulate the information gain in bits IG = post * log2(post) + H0.
+                # Do the calculations in stages to avoid allocating any large temporary arrays.
+                np.log2(self._buffer, out=self._buffer, where=self._buffer > 0)
+                self._buffer *= self.likelihood(self.features, design, self.parameters)
+                self._buffer *= self.prior
+                self._buffer /= post_norm
+                self.IG = self.H0 + self.parameters.sum(self._buffer)
+                if debug:
+                    log2posterior = np.log2(
+                        posterior, out=np.zeros_like(posterior), where=posterior > 0
+                    )
+                    IG = self.H0 + self.parameters.sum(posterior * log2posterior)
+                    assert np.allclose(IG, self.IG), "IG check failed"
 
-            # Leave the posterior in the buffer.
-            self._buffer[:] = self.likelihood
-            self._buffer *= self.prior
-            self._buffer /= post_norm
+                # Leave the posterior in the buffer.
+                self._buffer[:] = self.likelihood(self.features, design, self.parameters)
+                self._buffer *= self.prior
+                self._buffer /= post_norm
 
-        with GridStack(self.features, self.designs):
-            # Tabulate the expected information gain in bits as avg of IG(y,xi) with weights P(y|xi).
-            self.EIG = self.features.sum(self.marginal * self.IG)
+            with GridStack(self.features, design):
+                # Tabulate the expected information gain in bits as avg of IG(y,xi) with weights P(y|xi).
+                EIG = self.features.sum(self.marginal * self.IG)
+
+            # Create slices to record the EIG for the corresponding sub_design
+            start_indices = np.array(design.shape) * np.array(idxs)
+            end_indices = np.array(design.shape) * (np.array(idxs) + 1)
+            if np.array(list(self.sub_designs.keys())).max() in idxs:
+                # Handle the case where the last slice is not the same size as the others
+                dims = np.where(np.array(idxs) == np.array(list(self.sub_designs.keys())).max())[0]
+                start_indices[dims] = np.array(self.designs.shape)[dims] - np.array(design.shape)[dims]
+                end_indices[dims] = np.array(self.designs.shape)[dims]
+
+            slices = tuple(slice(start, end) for start, end in zip(start_indices, end_indices))
+
+            self.EIG[slices] = EIG
 
         self._initialized = True
         return self.designs.getmax(self.EIG)
