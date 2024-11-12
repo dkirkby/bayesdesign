@@ -83,7 +83,11 @@ class ExperimentDesigner:
 
             # Tabulate the posterior P(theta|y,xi) by normalizing P(y|theta,xi) P(theta) over parameters.
             post_norm = self.parameters.sum(self._buffer, keepdims=True)
-            self._buffer /= post_norm
+            # Use the prior for any (design, feature) points where the likelihood x prior is zero
+            # so the corresponding information gain
+            iszero = post_norm == 0
+            self._buffer[~iszero] /= post_norm[~iszero]
+            self._buffer[iszero] = self.prior[iszero]
             if debug:
                 posterior = self.parameters.normalize(self.likelihood * self.prior)
                 assert np.allclose(posterior, self._buffer), "posterior check failed"
