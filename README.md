@@ -30,6 +30,8 @@ plt.plot(designs.t_obs, designer.EIG)
 
 Browse the [examples folder](https://github.com/dkirkby/bayesdesign/) to learn more about using this package.
 
+To run the examples in [google colab](https://colab.research.google.com/), select **GitHub** and enter `https://github.com/dkirkby/bayesdesign`.
+
 ## Installation
 
 Install the [latest released version](https://github.com/dkirkby/bayesdesign/releases/latest) from [pypi](https://pypi.org/project/bayesdesign/) using:

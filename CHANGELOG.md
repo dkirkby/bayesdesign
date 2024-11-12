@@ -8,7 +8,9 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [0.5.0] - Unreleased
 
-No changes yet
+### Added
+
+- Support for running notebooks via google colab (issue #6)
 
 ## [0.4.0] - 2024-09-24
 
