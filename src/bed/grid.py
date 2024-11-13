@@ -8,15 +8,13 @@ import numpy as np
 
 class Grid:
 
-    def __init__(self, constraint=None, **axes):
+    def __init__(self, constraint=None, full_shape=None, **axes):
         self.axes = {}
         self.axes_in = {}
         naxes = len(axes)
         for offset, name in enumerate(axes):
             # Check for a valid axis definition
             axis = np.atleast_1d(axes[name])
-            if axis.ndim != 1:
-                raise RuntimeError(f'Invalid grid for axis "{name}"')
             # Store the axis offset to its position in the grid
             shape = [1] * offset + [-1] + [1] * (naxes - offset - 1)
             self.axes[name] = axis.reshape(shape)
@@ -31,16 +29,28 @@ class Grid:
             if not inspect.isfunction(constraint):
                 raise ValueError("constraint must be a callable function")
             constraint_names = list(inspect.signature(constraint).parameters.keys())
+            if "idx" in constraint_names:
+                constraint_names = list(self.names) + ["idx"]
+            else:
+                constraint_names = list(self.names)
+
             for name in constraint_names:
-                if name not in self.names:
+                if name not in self.names and name != "idx":
                     raise ValueError("constraint uses an invalid axis name: " + name)
             # Evaluate the constraint function on the full grid
-            self.constraint_args = {name: self.axes[name] for name in constraint_names}
+            self.constraint_args = {name: self.axes[name] for name in constraint_names if name != "idx"}
+            if "idx" in constraint_names:
+                self.constraint_args["idx"] = np.arange(np.prod(full_shape)).reshape(full_shape)
             constraint_eval = constraint(**self.constraint_args)
+            self.constraint_eval = constraint_eval
             if np.any(constraint_eval < 0):
                 raise ValueError("constraint must be non-negative")
             # Replace the constrained axes with the reduced set of values
-            mapper = dict(zip(constraint_names, np.squeeze(constraint_eval).nonzero()))
+            if np.squeeze(constraint_eval).ndim != len(self.names):
+                # In the case where a constraint has already been applied
+                mapper = dict(zip(constraint_names, np.squeeze(constraint_eval).nonzero() * np.ones((len(self.names), 1)).astype(int)))
+            else:
+                mapper = dict(zip(constraint_names, np.squeeze(constraint_eval).nonzero()))
             constraint_offsets = []
             for offset, name in enumerate(self.names):
                 if name not in constraint_names:
@@ -195,6 +205,17 @@ class Grid:
             name: self.axes[name].ravel()[indices[k]]
             for k, name in enumerate(self.names)
         }
+
+    def subgrid(self, N):
+        total_size = np.prod(self.shape)
+        # check that N is a positive integer
+        if not isinstance(N, int) or N <= 0:
+            raise ValueError("N must be an integer")
+        num_grids = np.ceil(total_size / N)
+        for i in range(int(num_grids)):
+            constraint_func = lambda idx, **kwargs: (idx >= i*N) & (idx < (i+1)*N)
+            subgrid = Grid(**self.axes, constraint = constraint_func, full_shape = self.shape)
+            yield subgrid, subgrid.constraint_eval
 
 
 def PermutationInvariant(*args):
