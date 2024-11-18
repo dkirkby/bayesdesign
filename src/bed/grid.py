@@ -31,9 +31,6 @@ class Grid:
             constraint_names = list(inspect.signature(constraint).parameters.keys())
             if "idx" in constraint_names:
                 constraint_names = list(self.names) + ["idx"]
-            else:
-                constraint_names = list(self.names)
-
             for name in constraint_names:
                 if name not in self.names and name != "idx":
                     raise ValueError("constraint uses an invalid axis name: " + name)
@@ -46,8 +43,7 @@ class Grid:
             if np.any(constraint_eval < 0):
                 raise ValueError("constraint must be non-negative")
             # Replace the constrained axes with the reduced set of values
-            if np.squeeze(constraint_eval).ndim != len(self.names):
-                # In the case where a constraint has already been applied
+            if "idx" in constraint_names:
                 mapper = dict(zip(constraint_names, np.squeeze(constraint_eval).nonzero() * np.ones((len(self.names), 1)).astype(int)))
             else:
                 mapper = dict(zip(constraint_names, np.squeeze(constraint_eval).nonzero()))
