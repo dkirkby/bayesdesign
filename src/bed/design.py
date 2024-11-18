@@ -18,8 +18,8 @@ class ExperimentDesigner:
         designs : Grid
             grid used to tabulate the design space
         unnorm_lfunc : function
-            unnormalized likelihood function that takes the features, designs, 
-            and parameters as arguments
+            unnormalized likelihood function that takes the parameters, features,
+            and designs as arguments
         lfunc_args : dict
             additional parameters that are required to evaluate the likelihood function
         mem : float
@@ -128,7 +128,7 @@ class ExperimentDesigner:
         return self.designs.getmax(self.EIG)
 
     def likelihood_func(self, s):
-        likelihood = self.unnorm_lfunc(self.features, s, self.parameters, **self.lfunc_args)
+        likelihood = self.unnorm_lfunc(self.parameters, self.features, s, **self.lfunc_args)
         self.features.normalize(likelihood)
         return likelihood
 

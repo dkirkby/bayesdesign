@@ -13,7 +13,7 @@ class TestDesign(unittest.TestCase):
         features = Grid(y_obs=np.linspace(-1.25, 1.25, 100))
         params = Grid(amplitude=1, frequency=np.linspace(0.2, 2.0, 181), offset=0)
 
-        def unnorm_lfunc(features, designs, params, **kwargs):
+        def unnorm_lfunc(params, features, designs, **kwargs):
             y_mean = params.amplitude * np.sin(
                 params.frequency * (designs.t_obs - params.offset)
             )
@@ -47,7 +47,7 @@ class TestDesign(unittest.TestCase):
         features = Grid(y_obs=np.linspace(-1.25, 1.25, 100))
         params = Grid(amplitude=1, frequency=np.linspace(0.2, 2.0, 181), offset=0)
 
-        def unnorm_lfunc(features, designs, params, **kwargs):
+        def unnorm_lfunc(params, features, designs, **kwargs):
             y_mean = params.amplitude * np.sin(
                 params.frequency * (designs.t_obs - params.offset)
             )
@@ -83,7 +83,7 @@ class TestDesign(unittest.TestCase):
         features = Grid(y_obs=np.linspace(-1.25, 1.25, 100))
         params = Grid(amplitude=1, frequency=np.linspace(0.2, 2.0, 181), offset=0)
 
-        def unnorm_lfunc(features, designs, params, **kwargs):
+        def unnorm_lfunc(params, features, designs, **kwargs):
             y_mean = params.amplitude * np.sin(
                 params.frequency * (designs.t_obs - params.offset)
             )
