@@ -78,8 +78,6 @@ class ExperimentDesigner:
         # Calculate prior entropy in bits (careful with x log x = 0 for x=0).
         log2prior = np.log2(prior, out=np.zeros_like(prior), where=prior > 0)
         self.H0 = -self.parameters.sum(prior * log2prior)
-        if self.num_subgrids > 1:
-            print(f"Splitting design grid into {int(self.num_subgrids)} subgrids...")
         for i, (s, mask) in enumerate(self.designs.subgrid(self.design_subgrid)):
             with GridStack(self.features, s, self.parameters):
                 sub_likelihood = self.likelihood_func(s)
@@ -172,7 +170,10 @@ class ExperimentDesigner:
             return
         for name in ("designs", "features", "parameters"):
             grid = self.__dict__[name]
-            print(f"GRID  {name:>16s} {repr(grid)}")
+            if name == "designs":
+                print(f"GRID  {name:>16s} {repr(grid)}, {self.num_subgrids} subgrids used")
+            else:
+                print(f"GRID  {name:>16s} {repr(grid)}")
         for name in ("prior", "likelihood", "marginal", "IG", "EIG"):
             array = self.__dict__[name]
             if name == "likelihood" and self.num_subgrids > 1:
