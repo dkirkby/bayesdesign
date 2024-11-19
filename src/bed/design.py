@@ -170,7 +170,7 @@ class ExperimentDesigner:
             return
         for name in ("designs", "features", "parameters"):
             grid = self.__dict__[name]
-            if name == "designs":
+            if name == "designs" and self.num_subgrids > 1:
                 print(f"GRID  {name:>16s} {repr(grid)}, {self.num_subgrids} subgrids used")
             else:
                 print(f"GRID  {name:>16s} {repr(grid)}")
@@ -189,12 +189,24 @@ class ExperimentDesigner:
 
     def get_posterior(self, **design_and_features):
         """Return the posterior P(theta|D,xi) for the specified design and features."""
-        # TODO: Check that design and features are fully specified...
 
-        with GridStack(self.features, self.designs, self.parameters) as stack:
-            loc = stack.at(**design_and_features)
-            # Return a copy so that future changes to our buffer have no side effects.
-            return np.array(self.posterior[loc])
+        # match the input names to the grid names
+        designs = {}
+        features = {}
+        for name in design_and_features:
+            if name in self.designs.names:
+                designs[name] = design_and_features[name]
+            elif name in self.features.names:
+                features[name] = design_and_features[name]
+        cond_designs = Grid(**designs)
+        cond_features = Grid(**features)
+
+        cond_likelihood = self.unnorm_lfunc(self.parameters, cond_features, cond_designs, **self.lfunc_args)
+        cond_likelihood *= self.prior
+        post_norm = self.parameters.sum(cond_likelihood, keepdims=True)
+        self.posterior = likelihood / post_norm
+        return self.posterior
+
 
     def update(self, **design_and_features):
         post = self.get_posterior(**design_and_features)
