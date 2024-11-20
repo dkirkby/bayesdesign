@@ -36,8 +36,9 @@ class ExperimentDesigner:
         else:
             if mem <= 0:
                 raise ValueError("Memory limit must be positive")
-            # Calculate the fractional decrease required to meet the memory limit.
-            frac = mem / ((np.prod(self.features.shape) * 
+            # Calculate the fractional decrease required to meet the memory limit
+            # accounting for the fact that the buffer doubles the memory usage.
+            frac = mem / (2 * (np.prod(self.features.shape) * 
                 np.prod(self.designs.shape) * 
                 np.prod(self.parameters.shape) * 8)/(1 << 20))
             self.design_subgrid = int(frac * np.prod(self.designs.shape))
@@ -79,17 +80,16 @@ class ExperimentDesigner:
         log2prior = np.log2(prior, out=np.zeros_like(prior), where=prior > 0)
         self.H0 = -self.parameters.sum(prior * log2prior)
         for i, (s, mask) in enumerate(self.designs.subgrid(self.design_subgrid)):
+            if i == 0:
+                # Store first subgrid likelihood for describe function
+                self.subgrid_shape = s.shape
             with GridStack(self.features, s, self.parameters):
-                sub_likelihood = self.likelihood_func(s)
-                if i == 0:
-                    # Store first subgrid likelihood for describe function
-                    self.likelihood = sub_likelihood
+                sub_likelihood = self.likelihood_func(s) # use of memory
                 assert np.allclose(self.features.sum(sub_likelihood), 1)
                 # Tabulate the marginal probability P(y|xi) by integrating P(y|theta,xi) P(theta) over theta.
                 # No explicit normalization is required since P(y|theta,xi) and P(theta) are already normalized.
                 # Check that the likelihood is normalized over features
-                self._buffer = np.zeros_like(sub_likelihood)
-                self._buffer[:] = sub_likelihood
+                self._buffer = np.array(sub_likelihood)
                 self._buffer *= self.prior
                 if i == 0:
                     # Store first subgrid likelihood for describe function
@@ -98,23 +98,29 @@ class ExperimentDesigner:
                 if debug:
                     assert np.allclose(self.parameters.sum(self.likelihood_func(s) * self.prior), 
                                     marginal), "marginal check failed"
-
                 # Tabulate the posterior P(theta|y,xi) by normalizing P(y|theta,xi) P(theta) over parameters.
+                # Use the prior for any (design, feature) points where the likelihood x prior is zero
+                # so the corresponding information gain is zero.
                 post_norm = self.parameters.sum(self._buffer, keepdims=True)
-                self._buffer /= post_norm
+                self._buffer = np.divide(
+                    self._buffer, post_norm, out=self._buffer, where=post_norm > 0
+                )
                 if debug:
+                    # This will fail if the likelihood*prior is zero for any (design, feature) point.
                     posterior = self.parameters.normalize(self.likelihood_func(s) * self.prior)
                     assert np.allclose(posterior, self._buffer), "posterior check failed"
-
                 # Tabulate the information gain in bits IG = post * log2(post) + H0.
                 # Do the calculations in stages to avoid allocating any large temporary arrays.
                 np.log2(self._buffer, out=self._buffer, where=self._buffer > 0)
                 self._buffer *= self.likelihood_func(s)
                 self._buffer *= self.prior
-                self._buffer /= post_norm
+                self._buffer = np.divide(
+                    self._buffer, post_norm, out=self._buffer, where=post_norm > 0
+                )
                 if i == 0:
                     self.IG = self.H0 + self.parameters.sum(self._buffer)
                 IG = self.H0 + self.parameters.sum(self._buffer)
+                IG[post_norm.reshape(IG.shape) == 0] = 0
                 if debug:
                     log2posterior = np.log2(
                         posterior, out=np.zeros_like(posterior), where=posterior > 0
@@ -125,6 +131,7 @@ class ExperimentDesigner:
                 self.EIG[mask] = self.features.sum(marginal * IG).flatten()
         self.EIG = self.EIG.reshape(self.designs.shape)
         self._initialized = True
+        del self._buffer
         return self.designs.getmax(self.EIG)
 
     def likelihood_func(self, s):
@@ -147,8 +154,7 @@ class ExperimentDesigner:
         for s in self.designs.subgrid(self.design_subgrid):
             with GridStack(self.features, s, self.parameters):
                 sub_likelihood = self.likelihood_func(s)
-                self._buffer = np.zeros_like(sub_likelihood)
-                self._buffer[:] = sub_likelihood
+                self._buffer = np.array(sub_likelihood)
                 self._buffer *= self.prior
                 marginal = self.parameters.sum(self._buffer)
                 posterior = self.parameters.normalize(self.likelihood_func(s) * self.prior)
@@ -174,18 +180,27 @@ class ExperimentDesigner:
                 print(f"GRID  {name:>16s} {repr(grid)}, {self.num_subgrids} subgrids used")
             else:
                 print(f"GRID  {name:>16s} {repr(grid)}")
-        for name in ("prior", "likelihood", "marginal", "IG", "EIG"):
+        for name in ("prior", "subgrid_shape", "marginal", "IG", "EIG"):
             array = self.__dict__[name]
-            if name == "likelihood" and self.num_subgrids > 1:
-                likelihood_name = "full_likelihood"
-                likelihood_shape = str(self.features.shape + self.designs.shape + self.parameters.shape)
-                likelihood_size = np.prod(self.features.shape) * np.prod(self.designs.shape) * np.prod(self.parameters.shape) * 8 / (1 << 20)
+            if name == "subgrid_shape":
+                if self.num_subgrids > 1:
+                    full_likelihood_name = "full_likelihood"
+                    full_likelihood_shape = str(self.features.shape + self.designs.shape + self.parameters.shape)
+                    full_likelihood_size = np.prod(self.features.shape) * np.prod(self.designs.shape) * np.prod(self.parameters.shape) * 8 / (1 << 20)
+                    print(
+                        f"ARRAY {full_likelihood_name:>16s} {full_likelihood_shape:26s} {full_likelihood_size:9.1f} Mb"
+                        )
+                name = "likelihood"
+                likelihood_shape = str(self.features.shape + self.subgrid_shape + self.parameters.shape)
+                likelihood_size = np.prod(self.features.shape) * np.prod(self.subgrid_shape) * np.prod(self.parameters.shape) * 8 / (1 << 20)
                 print(
-                    f"ARRAY {likelihood_name:>16s} {likelihood_shape:26s} {likelihood_size:9.1f} Mb"
+                    f"ARRAY {name:>16s} {likelihood_shape:26s} {likelihood_size:9.1f} Mb"
                     )
-            print(
-                f"ARRAY {name:>16s} {repr(array.shape):26s} {array.nbytes/(1<<20):9.1f} Mb"
-            )
+            else:
+                print(
+                    f"ARRAY {name:>16s} {repr(array.shape):26s} {array.nbytes/(1<<20):9.1f} Mb"
+                    )
+
 
     def get_posterior(self, **design_and_features):
         """Return the posterior P(theta|D,xi) for the specified design and features."""
@@ -201,11 +216,16 @@ class ExperimentDesigner:
         cond_designs = Grid(**designs)
         cond_features = Grid(**features)
 
-        cond_likelihood = self.unnorm_lfunc(self.parameters, cond_features, cond_designs, **self.lfunc_args)
-        cond_likelihood *= self.prior
-        post_norm = self.parameters.sum(cond_likelihood, keepdims=True)
-        self.posterior = likelihood / post_norm
-        return self.posterior
+        self._buffer = self.unnorm_lfunc(self.parameters, cond_features, cond_designs, **self.lfunc_args)
+        self._buffer *= self.prior
+        post_norm = self.parameters.sum(self._buffer, keepdims=True)
+        self._buffer = np.divide(
+            self._buffer, post_norm, out=self._buffer, where=post_norm > 0
+        )
+        self._buffer = np.add(
+            self._buffer, self.prior, out=self._buffer, where=post_norm == 0
+        )
+        return self._buffer
 
 
     def update(self, **design_and_features):
