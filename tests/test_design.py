@@ -35,6 +35,7 @@ class TestDesign(unittest.TestCase):
         self.assertEqual(designer.subgrid_shape, (51,))
         self.assertEqual(best["t_obs"], 3.5)
         self.assertEqual(designer.marginal.shape, (100, 51))
+        self.assertEqual(designer.get_posterior(t_obs=2.0, y_obs=0.2).max(), 0.07484451100061842)
         self.assertEqual(designer.IG.shape, (100, 51))
         self.assertEqual(designer.EIG.shape, (51,))
 
@@ -69,6 +70,7 @@ class TestDesign(unittest.TestCase):
         self.assertEqual(designer.subgrid_shape, (10,))
         self.assertEqual(best["t_obs"], 3.5)
         self.assertEqual(designer.marginal.shape, (100, 10))
+        self.assertEqual(designer.get_posterior(t_obs=2.0, y_obs=0.2).max(), 0.07484451100061842)
         self.assertEqual(designer.IG.shape, (100, 10))
         self.assertEqual(designer.EIG.shape, (51,))
 
