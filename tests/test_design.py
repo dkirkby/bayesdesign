@@ -32,8 +32,7 @@ class TestDesign(unittest.TestCase):
         self.assertAlmostEqual(prior.sum(), 1)
 
         best = designer.calculateEIG(prior)
-        self.assertEqual(designer.likelihood.shape, (100, 51, 1, 181, 1))
-        self.assertAlmostEqual(designer.likelihood.max(), 0.10114700589838203)
+        self.assertEqual(designer.subgrid_shape, (51,))
         self.assertEqual(best["t_obs"], 3.5)
         self.assertEqual(designer.marginal.shape, (100, 51))
         self.assertEqual(designer.IG.shape, (100, 51))
@@ -67,11 +66,10 @@ class TestDesign(unittest.TestCase):
         self.assertAlmostEqual(prior.sum(), 1)
 
         best = designer.calculateEIG(prior)
-        self.assertEqual(designer.likelihood.shape, (100, 21, 1, 181, 1))
-        self.assertAlmostEqual(designer.likelihood.max(), 0.10114700589838203)
+        self.assertEqual(designer.subgrid_shape, (10,))
         self.assertEqual(best["t_obs"], 3.5)
-        self.assertEqual(designer.marginal.shape, (100, 21))
-        self.assertEqual(designer.IG.shape, (100, 21))
+        self.assertEqual(designer.marginal.shape, (100, 10))
+        self.assertEqual(designer.IG.shape, (100, 10))
         self.assertEqual(designer.EIG.shape, (51,))
 
         self.assertAlmostEqual(designer.EIG.min(), 0)
