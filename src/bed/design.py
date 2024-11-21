@@ -129,7 +129,6 @@ class ExperimentDesigner:
                                     IG), "IG check failed"
 
                 self.EIG[mask] = self.features.sum(marginal * IG).flatten()
-        self.EIG = self.EIG.reshape(self.designs.shape)
         self._initialized = True
         del self._buffer
         return self.designs.getmax(self.EIG)
@@ -150,24 +149,29 @@ class ExperimentDesigner:
         log2prior = np.log2(prior, out=np.zeros_like(prior), where=prior > 0)
         H0 = -self.parameters.sum(prior * log2prior)
         # Calculate the marginal posterior and the information gain.
-        full_EIG = np.array([])
-        for s in self.designs.subgrid(self.design_subgrid):
+        EIG = np.full(self.designs.shape, np.nan)
+        for (s, mask) in self.designs.subgrid(self.design_subgrid):
             with GridStack(self.features, s, self.parameters):
                 sub_likelihood = self.likelihood_func(s)
                 self._buffer = np.array(sub_likelihood)
                 self._buffer *= self.prior
                 marginal = self.parameters.sum(self._buffer)
-                posterior = self.parameters.normalize(self.likelihood_func(s) * self.prior)
+                post_norm = self.parameters.sum(self._buffer, keepdims=True)
+                self._buffer = np.divide(
+                    self._buffer, post_norm, out=self._buffer, where=post_norm > 0
+                )
+                self._buffer = np.add(
+                    self._buffer, self.prior, out=self._buffer, where=post_norm == 0
+                )
                 post = self.parameters.sum(
-                    posterior, axis_names=nuisance_params, keepdims=True
+                    self._buffer, axis_names=nuisance_params, keepdims=True
                 )
                 # Calculate the information gain for all possible designs and measurements
                 log2post = np.log2(post, out=np.zeros_like(post), where=post > 0)
                 IG = H0 + self.parameters.sum(post * log2post)
                 # Tabulate the expected information gain in bits.
-                EIG = self.features.sum(marginal * IG)
-                full_EIG = np.concatenate((full_EIG, EIG.squeeze()), axis=0)
-        EIG = full_EIG.reshape(self.designs.shape)
+                EIG[mask] = self.features.sum(marginal * IG).flatten()
+        del self._buffer
         return EIG
 
     def describe(self):
@@ -204,7 +208,9 @@ class ExperimentDesigner:
 
     def get_posterior(self, **design_and_features):
         """Return the posterior P(theta|D,xi) for the specified design and features."""
-
+        if not self._initialized:
+            print("Not initialized")
+            return
         # match the input names to the grid names
         designs = {}
         features = {}
