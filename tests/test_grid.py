@@ -124,6 +124,31 @@ class TestGrid(unittest.TestCase):
         with self.assertRaises(ValueError):
             grid.sum(np.ones(grid.shape), axis_names=("x", "z"))
 
+    def test_subgrid(self):
+        grid = Grid(x=np.arange(3), y=np.arange(3))
+        s, mask = next(grid.subgrid(2))
+        self.assertTrue(np.array_equal(s.x, [[0], [0]]))
+        self.assertTrue(np.array_equal(s.y, [[0], [1]]))
+        self.assertTrue(len(list(grid.subgrid(2))) == 5)
+        self.assertTrue(np.array_equal(mask, 
+        [[ True,  True, False],
+        [False, False, False],
+        [False, False, False]]))
+
+    def test_subgrid_constrained(self):
+        grid = Grid(x=np.arange(3), y=np.arange(3), constraint=lambda x, y: x + y < 3)
+        s, mask = next(grid.subgrid(3))
+        self.assertTrue(np.array_equal(s.x, [[0], [0], [0]]))
+        self.assertTrue(np.array_equal(s.y, [[0], [1], [2]]))
+        self.assertTrue(len(list(grid.subgrid(3))) == 2)
+        self.assertTrue(np.array_equal(mask, [[True],[True],[True],[False],[False],[False]]))
+
+    def test_subgrid_invalid(self):
+        grid = Grid(x=np.arange(3), y=np.arange(3))
+        with self.assertRaises(ValueError):
+            next(grid.subgrid(2.1))
+        with self.assertRaises(ValueError):
+            next(grid.subgrid(-1))
 
 class TestPermutationInvariant(unittest.TestCase):
 
