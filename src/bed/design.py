@@ -82,9 +82,14 @@ class ExperimentDesigner:
                 assert np.allclose(marginal, self.marginal), "marginal check failed"
 
             # Tabulate the posterior P(theta|y,xi) by normalizing P(y|theta,xi) P(theta) over parameters.
+            # Use the prior for any (design, feature) points where the likelihood x prior is zero
+            # so the corresponding information gain is zero.
             post_norm = self.parameters.sum(self._buffer, keepdims=True)
-            self._buffer /= post_norm
+            self._buffer = np.divide(
+                self._buffer, post_norm, out=self._buffer, where=post_norm > 0
+            )
             if debug:
+                # This will fail if the likelihood*prior is zero for any (design, feature) point.
                 posterior = self.parameters.normalize(self.likelihood * self.prior)
                 assert np.allclose(posterior, self._buffer), "posterior check failed"
 
@@ -93,8 +98,11 @@ class ExperimentDesigner:
             np.log2(self._buffer, out=self._buffer, where=self._buffer > 0)
             self._buffer *= self.likelihood
             self._buffer *= self.prior
-            self._buffer /= post_norm
+            self._buffer = np.divide(
+                self._buffer, post_norm, out=self._buffer, where=post_norm > 0
+            )
             self.IG = self.H0 + self.parameters.sum(self._buffer)
+            self.IG[post_norm.reshape(self.IG.shape) == 0] = 0
             if debug:
                 log2posterior = np.log2(
                     posterior, out=np.zeros_like(posterior), where=posterior > 0
@@ -105,7 +113,12 @@ class ExperimentDesigner:
             # Leave the posterior in the buffer.
             self._buffer[:] = self.likelihood
             self._buffer *= self.prior
-            self._buffer /= post_norm
+            self._buffer = np.divide(
+                self._buffer, post_norm, out=self._buffer, where=post_norm > 0
+            )
+            self._buffer = np.add(
+                self._buffer, self.prior, out=self._buffer, where=post_norm == 0
+            )
 
         with GridStack(self.features, self.designs):
             # Tabulate the expected information gain in bits as avg of IG(y,xi) with weights P(y|xi).

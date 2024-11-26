@@ -12,6 +12,10 @@ All notable changes to this project will be documented in this file. The format 
 
 - Support for running notebooks via google colab (issue #6)
 
+### Fixed
+
+- Handle cases where the posterior is un-normalizable for some (parameter,design) combinations (issue #5)
+
 ## [0.4.0] - 2024-09-24
 
 ### Added
