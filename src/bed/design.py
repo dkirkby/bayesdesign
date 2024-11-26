@@ -44,7 +44,7 @@ class ExperimentDesigner:
             self.design_subgrid = int(frac * np.prod(self.designs.shape))
             self.num_subgrids = np.ceil(np.prod(self.designs.shape) / self.design_subgrid)
             if self.design_subgrid == 0:
-                raise ValueError("Memory limit too low")
+                raise ValueError("Memory limit too low,", f"invalid subgrid size: {frac * np.prod(self.designs.shape)} < 1")
         self._initialized = False
         self.EIG = np.full(self.designs.shape, np.nan)
 
