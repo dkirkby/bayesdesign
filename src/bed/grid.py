@@ -31,8 +31,10 @@ class Grid:
             constraint_names = list(inspect.signature(constraint).parameters.keys())
             if "idx" in constraint_names:
                 constraint_names = list(self.names) + ["idx"]
+            elif "kwargs" in constraint_names:
+                constraint_names = list(self.names)
             for name in constraint_names:
-                if name not in self.names and name != "idx":
+                if name not in self.names and name != "idx" and name != "kwargs":
                     raise ValueError("constraint uses an invalid axis name: " + name)
             # Evaluate the constraint function on the full grid
             self.constraint_args = {name: self.axes[name] for name in constraint_names if name != "idx"}
