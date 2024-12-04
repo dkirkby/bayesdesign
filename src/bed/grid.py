@@ -266,6 +266,14 @@ def CosineBump(x):
     y /= np.sum(y)
     return y
 
+def Gaussian(x, mu, sigma):
+    """Helper function to define a prior that is a Gaussian centered at mu with standard deviation sigma."""
+    x = np.asarray(x)
+    if not np.all(np.diff(x) > 0):
+        raise ValueError("x must be monotonically increasing")
+    y = np.exp(-0.5 * ((x - mu) / sigma) ** 2)
+    y /= np.sum(y)
+    return y
 
 class GridStack:
     """A context manager to allow grids to be temporarily stacked together to create a larger grid."""
