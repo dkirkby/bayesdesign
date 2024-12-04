@@ -31,8 +31,10 @@ class Grid:
             constraint_names = list(inspect.signature(constraint).parameters.keys())
             if "idx" in constraint_names:
                 constraint_names = list(self.names) + ["idx"]
+            elif "kwargs" in constraint_names:
+                constraint_names = list(self.names)
             for name in constraint_names:
-                if name not in self.names and name != "idx":
+                if name not in self.names and name != "idx" and name != "kwargs":
                     raise ValueError("constraint uses an invalid axis name: " + name)
             # Evaluate the constraint function on the full grid
             self.constraint_args = {name: self.axes[name] for name in constraint_names if name != "idx"}
@@ -266,6 +268,14 @@ def CosineBump(x):
     y /= np.sum(y)
     return y
 
+def Gaussian(x, mu, sigma):
+    """Helper function to define a prior that is a Gaussian centered at mu with standard deviation sigma."""
+    x = np.asarray(x)
+    if not np.all(np.diff(x) > 0):
+        raise ValueError("x must be monotonically increasing")
+    y = np.exp(-0.5 * ((x - mu) / sigma) ** 2)
+    y /= np.sum(y)
+    return y
 
 class GridStack:
     """A context manager to allow grids to be temporarily stacked together to create a larger grid."""

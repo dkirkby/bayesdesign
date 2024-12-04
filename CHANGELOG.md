@@ -11,10 +11,19 @@ All notable changes to this project will be documented in this file. The format 
 ### Added
 
 - Support for running notebooks via google colab (issue #6)
+- Support for subgrids on the designs for memory efficiency
+- Notebook demonstrating subgrid capabilities
+- Memory constraint argument for ExperimentDesigner
+- Constraint can take in kwargs for variable axis names
 
 ### Fixed
 
 - Handle cases where the posterior is un-normalizable for some (parameter,design) combinations (issue #5)
+
+## Changed
+
+- ExperimentDesigner now takes in unnormalized likelihood as a function
+- Example notebooks are now compatible with API changes
 
 ## [0.4.0] - 2024-09-24
 
