@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [0.6.0] - Unreleased
 
+- Modernized GitHub Actions release workflow with trusted publishing, enhanced pre-release validation, and scientific package-specific features (issue #11)
+
 ## [0.5.0] - 2024-12-04
 
 ### Added
