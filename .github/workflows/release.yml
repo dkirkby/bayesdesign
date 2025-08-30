@@ -1,28 +1,150 @@
 name: Release
+# Modern release workflow with trusted publishing and enhanced validation
+# https://packaging.python.org/en/latest/guides/publishing-package-distribution-releases-using-github-actions-ci-cd-workflows/
 
 on:
   release:
     types: [created]
 
 jobs:
-  deploy:
+
+  pre-release-validation:
+    name: Pre-release validation
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.x"
+          cache: 'pip'
+      
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install setuptools wheel twine
-      - name: Print environment
-        run: env | sort
-      - name: Build and publish
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+          pip install tox pytest jupyter nbconvert matplotlib
+          pip install -r requirements.txt
+      
+      - name: Extract version from tag
+        id: get_version
         run: |
-          python setup.py sdist bdist_wheel
-          twine upload --repository pypi dist/*
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Extracted version: $VERSION"
+      
+      - name: Verify version consistency
+        run: |
+          PACKAGE_VERSION=$(python -c "import sys; sys.path.insert(0, 'src'); from bed import __version__; print(__version__)")
+          TAG_VERSION="${{ steps.get_version.outputs.version }}"
+          echo "Package version: $PACKAGE_VERSION"
+          echo "Tag version: $TAG_VERSION"
+          if [ "$PACKAGE_VERSION" != "$TAG_VERSION" ]; then
+            echo "❌ Version mismatch: package=$PACKAGE_VERSION, tag=$TAG_VERSION"
+            exit 1
+          fi
+          echo "✅ Version consistency verified"
+      
+      - name: Check changelog entry
+        run: |
+          TAG_VERSION="${{ steps.get_version.outputs.version }}"
+          if ! grep -q "## \[$TAG_VERSION\]" CHANGELOG.md; then
+            echo "❌ No changelog entry found for version $TAG_VERSION"
+            echo "Please add an entry to CHANGELOG.md"
+            exit 1
+          fi
+          echo "✅ Changelog entry found"
+      
+      - name: Run full test suite
+        run: tox -e py
+      
+      - name: Validate Jupyter notebooks
+        run: |
+          echo "🔍 Validating Jupyter notebooks in examples/"
+          cd examples
+          for notebook in *.ipynb; do
+            if [ "$notebook" = "dev.ipynb" ]; then
+              echo "⏭️  Skipping dev notebook: $notebook"
+              continue
+            fi
+            echo "📓 Validating: $notebook"
+            jupyter nbconvert --to notebook --execute --inplace "$notebook" --ExecutePreprocessor.timeout=300
+            echo "✅ Successfully executed: $notebook"
+          done
+          echo "✅ All notebooks validated successfully"
+
+  build:
+    name: Build distribution
+    needs: pre-release-validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+          cache: 'pip'
+      
+      - name: Install pypa/build
+        run: python3 -m pip install build --user
+      
+      - name: Build a binary wheel and a source tarball
+        run: python3 -m build
+      
+      - name: Verify build contents
+        run: |
+          echo "📦 Build artifacts:"
+          ls -la dist/
+          echo "📋 Wheel contents:"
+          python3 -m zipfile -l dist/*.whl
+          echo "📋 Source tarball contents:"
+          tar -tzf dist/*.tar.gz | head -20
+      
+      - name: Upload the binary wheel and source tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+  publish-to-pypi:
+    name: Publish to PyPI
+    needs:
+      - pre-release-validation
+      - build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/bayesdesign
+    permissions:
+      id-token: write
+    steps:
+      - name: Download the binary wheel and source tarball
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+      
+      - name: Verify artifacts before publishing
+        run: |
+          echo "🔍 Final artifact verification:"
+          ls -la dist/
+          echo "📊 Artifact checksums:"
+          cd dist && sha256sum * && cd ..
+      
+      - name: Publish distribution to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          print-hash: true
+      
+      - name: Create deployment summary
+        run: |
+          echo "## 🚀 Release Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Pre-release validation passed" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Package built successfully" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Published to PyPI" >> $GITHUB_STEP_SUMMARY
+          echo "- 🔗 [View on PyPI](https://pypi.org/project/bayesdesign/)" >> $GITHUB_STEP_SUMMARY

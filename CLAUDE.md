@@ -26,6 +26,11 @@ This is `bayesdesign`, a Python package for Bayesian optimal experiment design. 
 - Build package: `python -m build`
 - Install from source: `pip install .`
 
+### Release Process
+- Validate release readiness: `python scripts/validate_release.py`
+- The release process uses GitHub Actions with trusted publishing (see `TRUSTED_PUBLISHING_SETUP.md`)
+- Pre-release validation includes: tests, notebook execution, version consistency, changelog verification
+
 ## Architecture
 
 ### Core Components
