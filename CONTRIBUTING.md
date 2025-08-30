@@ -38,23 +38,47 @@ Update `requirements.txt`
 
 ### Release a new version
 
-Update the version string in `src/bed/__init__.py` (by removing "dev") and the top of the `CHANGELOG.md` file, then commit:
-```
-git add src/bed/__init__.py CHANGELOG.md
-git commit -m 'Prepare for release'
-git push
-```
-Tag the version in github, adding "v" in front of the numerical version, e.g. for version 0.1.0:
-```
-git tag v0.1.0
-git push --tags
-```
-Create a new release on github [here](https://github.com/dkirkby/bayesdesign/releases/new):
- - Select the newly created tag from the "Choose a tag" drop-down menu.
- - Leave the "Release title" blank.
- - Click "Generate release notes".
- - Click "Publish release".
- - Check that the Release github action has uploaded this version to pypi [here](https://pypi.org/project/bayesdesign).
+The release process uses GitHub Actions with trusted publishing for security and automation.
+
+#### Prerequisites
+- Ensure PyPI trusted publishing is configured (see `TRUSTED_PUBLISHING_SETUP.md`)
+- Verify GitHub environment protection is set up (see `GITHUB_ENVIRONMENT_SETUP.md`)
+
+#### Release Steps
+
+1. **Prepare the release**:
+   Update the version string in `src/bed/__init__.py` (by removing "dev") and the top of the `CHANGELOG.md` file, then commit:
+   ```
+   git add src/bed/__init__.py CHANGELOG.md
+   git commit -m 'Prepare for release'
+   git push
+   ```
+
+2. **Create and push the tag**:
+   Tag the version in github, adding "v" in front of the numerical version, e.g. for version 0.1.0:
+   ```
+   git tag v0.1.0
+   git push --tags
+   ```
+
+3. **Create the GitHub release**:
+   Create a new release on github [here](https://github.com/dkirkby/bayesdesign/releases/new):
+   - Select the newly created tag from the "Choose a tag" drop-down menu.
+   - Leave the "Release title" blank.
+   - Click "Generate release notes".
+   - Click "Publish release".
+
+4. **Monitor the automated release**:
+   - The GitHub Actions workflow will automatically build and test the package
+   - If environment protection is enabled, approve the deployment to PyPI
+   - Check that the release action has uploaded this version to pypi [here](https://pypi.org/project/bayesdesign)
+   - Verify all tests pass and examples execute successfully
+
+#### Security Features
+- **Trusted Publishing**: Uses OIDC instead of API tokens
+- **Environment Protection**: Requires approval for PyPI deployments  
+- **Automated Testing**: Runs full test suite including notebook validation
+- **Artifact Verification**: Ensures build reproducibility
 
 ## Start work on the next version
 
