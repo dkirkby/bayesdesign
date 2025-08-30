@@ -25,9 +25,11 @@ Create a protected environment in GitHub repository settings:
 1. Go to repository Settings → Environments
 2. Create new environment named `pypi`
 3. Configure protection rules:
-   - **Required reviewers**: Add maintainers
-   - **Wait timer**: 0 minutes (optional)
-   - **Deployment branches**: Only protected branches
+   - **Required reviewers**: 
+     - For solo maintainers: Leave empty (repository owners can always approve)
+     - For teams: Add trusted co-maintainers
+   - **Wait timer**: 5-10 minutes (optional - gives time to cancel accidental releases)  
+   - **Deployment branches**: See branch protection options in `GITHUB_ENVIRONMENT_SETUP.md`
 
 ### 3. Workflow Configuration
 
