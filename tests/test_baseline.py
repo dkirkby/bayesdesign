@@ -1,0 +1,431 @@
+"""Golden-value baseline tests for JAX rewrite compatibility contract.
+
+These tests capture the exact numerical outputs of the current NumPy
+implementation. They will later verify that the JAX rewrite produces
+identical (or sufficiently close) results.
+
+Tolerance strategy:
+- NumPy-to-NumPy (current): rtol=1e-12 (deterministic, same platform)
+- JAX target (float64):      rtol=1e-7
+- JAX target (float32):      rtol=1e-3
+"""
+
+import numpy as np
+import pytest
+
+from bed.grid import Grid, TopHat, CosineBump, Gaussian
+from bed.design import ExperimentDesigner
+
+# NumPy-to-NumPy tolerance (deterministic)
+RTOL = 1e-12
+
+
+# Golden values: Sine wave scenario
+SINE_H0 = np.log2(181)  # exact for uniform prior over 181 points
+# EIG values
+SINE_EIG = np.array([
+    -2.5709664415996595e-15, 0.17190478278965055, 0.5077378449924593,
+    0.8138457761061, 1.046721237120159, 1.2101698897177842,
+    1.3112842275096557, 1.3540582489714807, 1.3411662024717932,
+    1.2794212897689674, 1.1893295434466118, 1.1106759986131005,
+    1.0780498763885045, 1.0907121746317212, 1.1477691394575784,
+    1.293710919965335, 1.4830797981236932, 1.6610875946580603,
+    1.821058855307484, 1.9620634038764762, 2.083178831578263,
+    2.1831766916706954, 2.2603450585843285, 2.3125059080446198,
+    2.337921045180018, 2.3378998437521514, 2.321729521902501,
+    2.3076590944432778, 2.3091258570160385, 2.324464981468599,
+    2.3474443788334485, 2.3740085586026476, 2.4013969953962278,
+    2.427020460264832, 2.4457265170494744, 2.4501367058730814,
+    2.4395350045350668, 2.4220257914516337, 2.4080395273465838,
+    2.3990585233481565, 2.387837256886147, 2.368856750104929,
+    2.345928947676319, 2.3309804278638437, 2.3313198815025586,
+    2.3421083445458124, 2.357253842292806, 2.3741372592841667,
+    2.3911089648211568, 2.4066862380135863, 2.4192469993422514,
+])
+# marginal values in column 0
+SINE_MARGINAL_COL0 = np.array([
+    1.1856553934280675e-35, 2.697678958519063e-34, 5.758740670083348e-33,
+    1.1533742536414728e-31, 2.1672971372092068e-30, 3.8209568733156544e-29,
+    6.320206791662392e-28, 9.808349089035341e-27, 1.428124318200073e-25,
+    1.9509295560012738e-24, 2.5004756853177692e-23, 3.0068319562627214e-22,
+    3.392353897442945e-21, 3.590861225796168e-20, 3.566166075788118e-19,
+    3.322844217102164e-18, 2.904851071200548e-17, 2.382556650468194e-16,
+    1.8334457909820993e-15, 1.3237268734270243e-14, 8.96673162350226e-14,
+    5.698695225906832e-13, 3.397990530535088e-12, 1.900966096668687e-11,
+    9.977737000078348e-11, 4.913548046260409e-10, 2.270198517034867e-09,
+    9.840970683101088e-09, 4.0023725766671567e-08, 1.5272233807626877e-07,
+    5.467554087861314e-07, 1.8364921893032868e-06, 5.787494043249269e-06,
+    1.7111871184044927e-05, 4.746898234817054e-05, 0.0001235457511334893,
+    0.000301683238045346, 0.0006911622683517264, 0.001485642570931253,
+    0.0029960849542791427, 0.005668907694925236, 0.010063524802138755,
+    0.016761247183131385, 0.026191960923271165, 0.03840034898377673,
+    0.052821143914912105, 0.0681688404901993, 0.08254095427542002,
+    0.09376883880838571, 0.09994315707447733, 0.09994315707447733,
+    0.09376883880838571, 0.08254095427542002, 0.0681688404901993,
+    0.05282114391491225, 0.03840034898377673, 0.026191960923271165,
+    0.016761247183131385, 0.010063524802138804, 0.005668907694925236,
+    0.0029960849542791427, 0.001485642570931253, 0.0006911622683517288,
+    0.000301683238045347, 0.0001235457511334893, 4.746898234817054e-05,
+    1.711187118404486e-05, 5.787494043249289e-06, 1.836492189303296e-06,
+    5.467554087861314e-07, 1.5272233807626877e-07, 4.002372576667169e-08,
+    9.840970683101158e-09, 2.270198517034867e-09, 4.913548046260409e-10,
+    9.97773700007842e-11, 1.9009660966687006e-11, 3.397990530535088e-12,
+    5.698695225906832e-13, 8.966731623502321e-14, 1.3237268734270062e-14,
+    1.8334457909820993e-15, 2.382556650468229e-16, 2.904851071200548e-17,
+    3.322844217102164e-18, 3.566166075788068e-19, 3.590861225796168e-20,
+    3.392353897443018e-21, 3.006831956262679e-22, 2.5004756853177692e-23,
+    1.950929556001315e-24, 1.428124318200073e-25, 9.808349089035479e-27,
+    6.320206791662126e-28, 3.8209568733156544e-29, 2.1672971372092372e-30,
+    1.1533742536414728e-31, 5.758740670083348e-33, 2.697678958518948e-34,
+    1.1856553934280675e-35,
+])
+# marginal values in column 35
+SINE_MARGINAL_COL35 = np.array([
+    0.0003364048774696215, 0.0006405177591715508, 0.0011484715089859004,
+    0.0019403638798768023, 0.003091218545150697, 0.004647725137994354,
+    0.006602164949306304, 0.00887266064808949, 0.011299945348126663,
+    0.013667013958903518, 0.015739802665400343, 0.017317836737925155,
+    0.018278360875320674, 0.018599114083237146, 0.01835319333315532,
+    0.01768025682281431, 0.01674633497222091, 0.01570637258877022,
+    0.014679546209696406, 0.013740476749770915, 0.012923382106152103,
+    0.012233225931895006, 0.011658130632591121, 0.011179406927136929,
+    0.010777923625458097, 0.010437194075931733, 0.010144250071854861,
+    0.009889366877165608, 0.009665382241162954, 0.009467004788134493,
+    0.009290261245540367, 0.009132101590641754, 0.008990131640652098,
+    0.008862434752883681, 0.008747451773749665, 0.008643898225962463,
+    0.00855070548918024, 0.008466977841085445, 0.008391960330009954,
+    0.008325014286419085, 0.008265598376480334, 0.008213253774505132,
+    0.008167592460680953, 0.008128287934697713, 0.008095067829978637,
+    0.008067708049522861, 0.00804602814246831, 0.008029887712788751,
+    0.008019183706175121, 0.00801384846364388, 0.008013848464740573,
+    0.00801918371267394, 0.008029887742300689, 0.00804602826737687,
+    0.0080677085455611, 0.008095069678739124, 0.008128294401609098,
+    0.008167613691564789, 0.008213319192624705, 0.008265787563213126,
+    0.008325527797305433, 0.008393268543403961, 0.00847010594343865,
+    0.008557725860243687, 0.00865868655441573, 0.008776690671594513,
+    0.00891669585224558, 0.009084647447416248, 0.009286630926387287,
+    0.009527404187582274, 0.009808593995968059, 0.010127225275931696,
+    0.010475481238760413, 0.010842432890010367, 0.011217842752950461,
+    0.011597222478682207, 0.011986511119389358, 0.01240443744005518,
+    0.012880973021540369, 0.013451089582072145, 0.01414401052942886,
+    0.01496919005459161, 0.015901512045855975, 0.016869736523244975,
+    0.017753503678538944, 0.018394001591288064, 0.018620454134601536,
+    0.018288835261989687, 0.017322662264171295, 0.015741889272616164,
+    0.013667860822558546, 0.011300267944669744, 0.00887277598700301,
+    0.006602203653525121, 0.004647737327983312, 0.0030912221485054512,
+    0.0019403648795671196, 0.0011484717692862147, 0.0006405178227823044,
+    0.00033640489205873737,
+])
+# posterior values at t=2, y=0.2
+SINE_POST_T2_Y02 = np.array([
+    0.01244663119255765, 0.008646850293588384, 0.005829803680517256,
+    0.003818590879666265, 0.0024326922895811214, 0.001509055318693464,
+    0.0009125837720019639, 0.0005386681132445439, 0.0003107397713432715,
+    0.00017541203101765097, 9.702454893617698e-05, 5.2656043599018586e-05,
+    2.8077253555709952e-05, 1.4730114876562132e-05, 7.61406980681848e-06,
+    3.883368766575991e-06, 1.9570864385899047e-06, 9.760119416497108e-07,
+    4.823726764810309e-07, 2.3661096344270137e-07, 1.1536023814781885e-07,
+    5.5987662594508195e-08, 2.7088778669134516e-08, 1.30855651874262e-08,
+    6.320400542458519e-09, 3.056932012398083e-09, 1.4826951633298795e-09,
+    7.222266346563541e-10, 3.538139973012964e-10, 1.745715256167402e-10,
+    8.687150205210807e-11, 4.3660230996469017e-11, 2.2191586775090023e-11,
+    1.1422516334453134e-11, 5.961718258183476e-12, 3.1591421723252067e-12,
+    1.7017375199451782e-12, 9.329624416377716e-13, 5.211832452187908e-13,
+    2.970031885299334e-13, 1.728415651041155e-13, 1.0282655223212979e-13,
+    6.259890861451854e-14, 3.903436608336443e-14, 2.4954004565065208e-14,
+    1.636887080632232e-14, 1.1026387656380908e-14, 7.633295941203555e-15,
+    5.4345110283234535e-15, 3.981622452625739e-15, 3.003783373088188e-15,
+    2.334636916705381e-15, 1.8703408543559576e-15, 1.545098425482573e-15,
+    1.316689458477742e-15, 1.1578025469728036e-15, 1.0507895468245597e-15,
+    9.84480532751104e-16, 9.5227515956606e-16, 9.510627131715064e-16,
+    9.807273403100572e-16, 1.0441298109731152e-15, 1.1475618478118317e-15,
+    1.3017726457468138e-15, 1.5237984343316748e-15, 1.8400227395425228e-15,
+    2.2912176246584357e-15, 2.9408690588780838e-15, 3.8890610165723354e-15,
+    5.295929957771814e-15, 7.42185291226544e-15, 1.0697327341145497e-14,
+    1.5846293349921638e-14, 2.4106998020963554e-14, 3.763333121552881e-14,
+    6.023451285729659e-14, 9.875728747457938e-14, 1.6570325975847668e-13,
+    2.8424855277427966e-13, 4.979877864292872e-13, 8.900650503641692e-13,
+    1.6211347908939468e-12, 3.0054230975762195e-12, 5.6644789519290736e-12,
+    1.0840410360321992e-11, 2.1038372998410053e-11, 4.1351869577145095e-11,
+    8.220877811827905e-11, 1.6507955829914734e-10, 3.3436592050977453e-10,
+    6.821759279016507e-10, 1.399909853584372e-09, 2.8854214200536653e-09,
+    5.964770921911582e-09, 1.2348612130031683e-08, 2.55648164207082e-08,
+    5.284750365865383e-08, 1.0892274776475779e-07, 2.2350078944094948e-07,
+    4.558899770704745e-07, 9.230322501564158e-07, 1.852282291626493e-06,
+    3.6786793350538553e-06, 7.219989955863311e-06, 1.3983379165677742e-05,
+    2.6686777476495454e-05, 5.011570440786705e-05, 9.247816552452797e-05,
+    0.00016745416138224702, 0.0002971382329498703, 0.0005160042064178986,
+    0.0008758285317557136, 0.001451138419153242, 0.0023441745196490235,
+    0.0036876139035887, 0.005642543408106052, 0.00838871189362139,
+    0.012104357100605066, 0.01693434790491536, 0.022948251017292396,
+    0.03009398703062676, 0.038157057370005375, 0.046738312586366286,
+    0.055263051982978956, 0.0630295719168563, 0.0692961900681366,
+    0.07339426902300161, 0.07484451100061842, 0.07344891852271804,
+    0.06933411370517154, 0.06293313080874019, 0.05490903101319123,
+    0.04603927094178304, 0.03708929626570243, 0.028704294956642194,
+    0.021339954073654948, 0.01524004377122248, 0.010455641097083489,
+    0.00689191974607504, 0.004365520280444758, 0.0026579509859014673,
+    0.0015560001800437799, 0.0008761694558111573, 0.00047475962578053725,
+    0.0002476767148094522, 0.00012447085779638558, 6.029665262356039e-05,
+    2.8174734817609113e-05, 1.2708417480968852e-05, 5.537801106982102e-06,
+    2.333305464875998e-06, 9.514647127116847e-07, 3.758572225418796e-07,
+    1.439818439197975e-07, 5.35445465453307e-08, 1.9352425921827975e-08,
+    6.805803567947569e-09, 2.331733266054309e-09, 7.792648956287773e-10,
+    2.543714402487127e-10, 8.121136933895941e-11, 2.539428587207498e-11,
+    7.788388193521946e-12, 2.3463278048553706e-12, 6.953617821701431e-13,
+    2.030387619983404e-13, 5.850197689579167e-14, 1.6659979443033406e-14,
+    4.6966697116238874e-15, 1.3128825999599806e-15, 3.6450127891032496e-16,
+    1.0067779910750914e-16, 2.7711510244808395e-17, 7.614017381980139e-18,
+    2.0918666587387396e-18, 5.756555185873245e-19, 1.5894381577284792e-19,
+    4.4108387028716544e-20, 1.232363995102601e-20, 3.4724747383686216e-21,
+    9.884634048164622e-22,
+])
+# update values
+SINE_UPDATE_BEST_T = 3.9000000000000004
+SINE_UPDATE_H0 = 4.813710952831126
+SINE_UPDATE_EIG = np.array([
+    -5.311163167401176e-16, 0.06010209937511264, 0.2044489423968055,
+    0.3661927087920688, 0.49930263622674426, 0.5868340345102886,
+    0.6271533409790583, 0.6205239121037717, 0.5619289419158214,
+    0.44114771105970396, 0.25761875974428805, 0.06622554056049412,
+    0.031107878859129218, 0.28000268519314414, 0.6496098901643794,
+    0.9149072803282741, 1.039347599981416, 1.0923811440986682,
+    1.124583592693589, 1.152221108512669, 1.1776724233144034,
+    1.2000857933326015, 1.2181621501976863, 1.2307905095553922,
+    1.2373882589619674, 1.2382818345244042, 1.2351441740787148,
+    1.23158487935702, 1.2331979314063706, 1.2457318883337025,
+    1.2727232647793745, 1.311176363359978, 1.3332040455206833,
+    1.226265887193698, 0.830417753720315, 0.5097203404641474,
+    0.8903713674380627, 1.3402917180147773, 1.5027883773911954,
+    1.516071928421939, 1.4835765327006287, 1.4323247166246837,
+    1.368852264540122, 1.2979028106618564, 1.2255655361904971,
+    1.159748895316249, 1.1105852419051894, 1.0912681962536088,
+    1.1171375793209288, 1.196557629626061, 1.3187519205244262,
+])
+
+
+# Golden values: Multi-param scenario
+MULTI_H0 = 10.37829485591189
+MULTI_EIG = np.array([
+    1.9525785096321449, 1.938128491287999, 1.8957821744665915,
+    1.8327015101133324, 1.7848672580229505, 1.7943692123923052,
+    1.806238536520431, 1.805206078297007, 1.8137904543018726,
+    1.8693465185252944, 1.9565028759938639, 2.0596706653253123,
+    2.1716769898371493, 2.288659081737152, 2.4047567373127503,
+    2.51583641452576, 2.6108464199695467, 2.6812648382191338,
+    2.7287589827511853, 2.759300368066005, 2.780995894493177,
+    2.7946312862914064, 2.7991779185874317, 2.798755680132333,
+    2.7949666787296, 2.7900739543516786, 2.7891663851235746,
+    2.790129525220819, 2.787986340440223, 2.7848146515880683,
+    2.7782868968834813, 2.7721927102929143,
+])
+MULTI_BEST_T = 2.838709677419355
+MULTI_POST_MAX = 0.00752323574371786
+
+class TestSineWaveBaseline:
+    """Golden-value tests for the sine wave (1D frequency) scenario."""
+
+    def test_H0(self, sine_wave_designer):
+        # JAX target: rtol=1e-7 (float64) or rtol=1e-3 (float32)
+        designer = sine_wave_designer["designer"]
+        assert designer.H0 == pytest.approx(SINE_H0, rel=RTOL)
+        # Near-exact check: log2(181) for uniform prior over 181 points
+        # Not bitwise-exact due to different computation paths (sum then log vs direct)
+        assert designer.H0 == pytest.approx(np.log2(181), rel=1e-15)
+
+    def test_EIG_full_array(self, sine_wave_designer):
+        # JAX target: rtol=1e-7 (float64) or rtol=1e-3 (float32)
+        designer = sine_wave_designer["designer"]
+        np.testing.assert_allclose(designer.EIG, SINE_EIG, rtol=RTOL)
+        # Summary statistics
+        assert designer.EIG.min() == pytest.approx(SINE_EIG.min(), rel=RTOL)
+        assert designer.EIG.max() == pytest.approx(SINE_EIG.max(), rel=RTOL)
+        assert np.argmax(designer.EIG) == 35
+
+    def test_marginal_shape_and_slices(self, sine_wave_designer):
+        # JAX target: rtol=1e-7 (float64) or rtol=1e-3 (float32)
+        designer = sine_wave_designer["designer"]
+        assert designer.marginal.shape == (100, 51)
+        np.testing.assert_allclose(
+            designer.marginal[:, 0], SINE_MARGINAL_COL0, rtol=RTOL
+        )
+        np.testing.assert_allclose(
+            designer.marginal[:, 35], SINE_MARGINAL_COL35, rtol=RTOL
+        )
+
+    def test_IG_shape_and_slices(self, sine_wave_designer):
+        # JAX target: rtol=1e-7 (float64) or rtol=1e-3 (float32)
+        designer = sine_wave_designer["designer"]
+        assert designer.IG.shape == (100, 51)
+        # IG values should be non-negative (information gain >= 0)
+        assert designer.IG.min() >= -1e-10
+
+    def test_posterior(self, sine_wave_designer):
+        # JAX target: rtol=1e-7 (float64) or rtol=1e-3 (float32)
+        designer = sine_wave_designer["designer"]
+        params = sine_wave_designer["params"]
+
+        post1 = designer.get_posterior(t_obs=2.0, y_obs=0.2)
+        np.testing.assert_allclose(post1.ravel(), SINE_POST_T2_Y02, rtol=RTOL)
+        assert params.sum(post1) == pytest.approx(1.0, rel=1e-10)
+
+        assert params.sum(post1) == pytest.approx(1.0, rel=1e-10)
+
+    def test_update(self, sine_wave_designer):
+        # JAX target: rtol=1e-7 (float64) or rtol=1e-3 (float32)
+        # NOTE: update() mutates the designer, so we recreate it
+        designs = Grid(t_obs=np.linspace(0, 5, 51))
+        features = Grid(y_obs=np.linspace(-1.25, 1.25, 100))
+        params = Grid(
+            amplitude=1, frequency=np.linspace(0.2, 2.0, 181), offset=0
+        )
+
+        def unnorm_lfunc(params, features, designs, **kwargs):
+            y_mean = params.amplitude * np.sin(
+                params.frequency * (designs.t_obs - params.offset)
+            )
+            y_diff = features.y_obs - y_mean
+            return np.exp(-0.5 * (y_diff / kwargs["sigma_y"]) ** 2)
+
+        designer = ExperimentDesigner(
+            params, features, designs, unnorm_lfunc,
+            lfunc_args={"sigma_y": 0.1},
+        )
+        prior = np.ones(params.shape)
+        params.normalize(prior)
+        designer.calculateEIG(prior)
+
+        new_best = designer.update(t_obs=3.5, y_obs=-0.5)
+        assert new_best["t_obs"] == pytest.approx(SINE_UPDATE_BEST_T, rel=RTOL)
+        assert designer.H0 == pytest.approx(SINE_UPDATE_H0, rel=RTOL)
+        np.testing.assert_allclose(designer.EIG, SINE_UPDATE_EIG, rtol=RTOL)
+
+class TestSineWaveSubgridBaseline:
+    """Golden-value tests for sine wave with subgrid chunking (mem=3)."""
+
+    def test_EIG_matches_full(self, sine_wave_designer_subgrid):
+        # JAX target: rtol=1e-7 (float64) or rtol=1e-3 (float32)
+        # Parity test: subgrid EIG must match full computation exactly
+        designer = sine_wave_designer_subgrid["designer"]
+        np.testing.assert_allclose(designer.EIG, SINE_EIG, rtol=RTOL)
+
+    def test_subgrid_shape(self, sine_wave_designer_subgrid):
+        designer = sine_wave_designer_subgrid["designer"]
+        assert designer.subgrid_shape == (10,)
+
+    def test_num_subgrids(self, sine_wave_designer_subgrid):
+        # Confirms chunking actually happened
+        designer = sine_wave_designer_subgrid["designer"]
+        assert designer.num_subgrids > 1
+        assert designer.num_subgrids == 6
+
+class TestMultiParamBaseline:
+    """Golden-value tests for the multi-parameter (3D) scenario."""
+
+    def test_H0(self, multi_param_designer):
+        # JAX target: rtol=1e-7 (float64) or rtol=1e-3 (float32)
+        designer = multi_param_designer["designer"]
+        assert designer.H0 == pytest.approx(MULTI_H0, rel=RTOL)
+
+    def test_EIG_full_array(self, multi_param_designer):
+        # JAX target: rtol=1e-7 (float64) or rtol=1e-3 (float32)
+        designer = multi_param_designer["designer"]
+        np.testing.assert_allclose(designer.EIG, MULTI_EIG, rtol=RTOL)
+        best = multi_param_designer["designs"].getmax(designer.EIG)
+        assert best["t_obs"] == pytest.approx(MULTI_BEST_T, rel=RTOL)
+
+    def test_posterior(self, multi_param_designer):
+        # JAX target: rtol=1e-7 (float64) or rtol=1e-3 (float32)
+        designer = multi_param_designer["designer"]
+        params = multi_param_designer["params"]
+        post = designer.get_posterior(t_obs=MULTI_BEST_T, y_obs=0.3)
+        assert post.shape == (11, 11, 11)
+        assert post.max() == pytest.approx(MULTI_POST_MAX, rel=RTOL)
+        assert params.sum(post) == pytest.approx(1.0, rel=1e-10)
+
+    @pytest.mark.xfail(
+        reason="calculateMarginalEIG has a shape mismatch bug with multi-dim params "
+               "(marginal prior shape not compatible with parameters.sum). "
+               "See issue: H0 computation fails when prior is reduced by partial sum.",
+        strict=True,
+    )
+    def test_marginal_EIG(self, multi_param_designer):
+        # JAX target: rtol=1e-7 (float64) or rtol=1e-3 (float32)
+        designer = multi_param_designer["designer"]
+        marginal_eig = designer.calculateMarginalEIG("amplitude", "offset")
+        assert marginal_eig.shape == (32,)
+
+    @pytest.mark.xfail(
+        reason="calculateMarginalEIG has a shape mismatch bug with multi-dim params "
+               "(marginal prior shape not compatible with parameters.sum). "
+               "See issue: H0 computation fails when prior is reduced by partial sum.",
+        strict=True,
+    )
+    def test_marginal_EIG_single_nuisance(self, multi_param_designer):
+        # JAX target: rtol=1e-7 (float64) or rtol=1e-3 (float32)
+        designer = multi_param_designer["designer"]
+        marginal_eig = designer.calculateMarginalEIG("offset")
+        assert marginal_eig.shape == (32,)
+
+class TestGridOpsBaseline:
+    """Golden-value tests for Grid utility functions."""
+
+    def test_tophat(self):
+        # JAX target: rtol=1e-7 (float64) or rtol=1e-3 (float32)
+        th = TopHat(np.linspace(0.2, 2.0, 181))
+        assert th.shape == (181,)
+        assert th[0] == pytest.approx(0.0055248618784530384, rel=RTOL)
+        assert th[-1] == pytest.approx(0.0055248618784530384, rel=RTOL)
+        # All elements equal for TopHat
+        np.testing.assert_allclose(th, np.full(181, 1.0 / 181), rtol=RTOL)
+        assert th.sum() == pytest.approx(1.0, rel=1e-14)
+
+    def test_cosine_bump(self):
+        # JAX target: rtol=1e-7 (float64) or rtol=1e-3 (float32)
+        cb = CosineBump(np.linspace(0.8, 1.2, 50))
+        assert cb.shape == (50,)
+        assert cb[0] == pytest.approx(0.0, abs=1e-15)
+        assert cb[-1] == pytest.approx(0.0, abs=1e-15)
+        assert cb[25] == pytest.approx(0.040774395770415035, rel=RTOL)
+        assert cb.max() == pytest.approx(0.040774395770415035, rel=RTOL)
+        assert cb.sum() == pytest.approx(1.0, rel=1e-14)
+
+    def test_gaussian(self):
+        # JAX target: rtol=1e-7 (float64) or rtol=1e-3 (float32)
+        g = Gaussian(np.linspace(-3, 3, 101), 0, 1)
+        assert g.shape == (101,)
+        assert g[0] == pytest.approx(0.0002665618112378019, rel=RTOL)
+        assert g[50] == pytest.approx(0.023995129561898122, rel=RTOL)
+        assert g[-1] == pytest.approx(0.0002665618112378019, rel=RTOL)
+        assert g.max() == pytest.approx(0.023995129561898122, rel=RTOL)
+        assert g.sum() == pytest.approx(1.0, rel=1e-14)
+        # Symmetric
+        np.testing.assert_allclose(g[:50], g[-1:-51:-1], rtol=RTOL)
+
+    def test_normalize(self):
+        # JAX target: rtol=1e-7 (float64) or rtol=1e-3 (float32)
+        grid = Grid(x=np.linspace(0, 1, 10))
+        vals = np.exp(-np.linspace(0, 1, 10)).reshape(grid.shape)
+        normed = vals.copy()
+        grid.normalize(normed)
+        expected = np.array([
+            0.15676741786282353, 0.14028164909912186, 0.12552953504145134,
+            0.11232876337651782, 0.10051619387844621, 0.08994584225896952,
+            0.08048707603730937, 0.07202300013361215, 0.06444901223448275,
+            0.05767151007726551,
+        ])
+        np.testing.assert_allclose(normed.ravel(), expected, rtol=RTOL)
+        assert grid.sum(normed) == pytest.approx(1.0, rel=1e-14)
+
+    def test_partial_sum(self):
+        # JAX target: rtol=1e-7 (float64) or rtol=1e-3 (float32)
+        grid = Grid(x=np.arange(3), y=np.arange(4))
+        vals = ((grid.x + 1) * (grid.y + 1)).astype(float)
+        # Sum over x: result shape (4,)
+        partial_x = grid.sum(vals, axis_names=("x",))
+        np.testing.assert_allclose(partial_x, [6.0, 12.0, 18.0, 24.0], rtol=RTOL)
+        # Sum over y: result shape (3,)
+        partial_y = grid.sum(vals, axis_names=("y",))
+        np.testing.assert_allclose(partial_y, [10.0, 20.0, 30.0], rtol=RTOL)
+        # Full sum
+        assert grid.sum(vals) == pytest.approx(60.0, rel=RTOL)
