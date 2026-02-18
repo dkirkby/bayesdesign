@@ -271,7 +271,7 @@ class TestSineWaveBaseline:
 
         assert params.sum(post1) == pytest.approx(1.0, rel=1e-10)
 
-    def test_update(self, sine_wave_designer):
+    def test_update(self):
         # JAX target: rtol=1e-7 (float64) or rtol=1e-3 (float32)
         # NOTE: update() mutates the designer, so we recreate it
         designs = Grid(t_obs=np.linspace(0, 5, 51))
