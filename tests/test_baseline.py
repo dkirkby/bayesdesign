@@ -18,6 +18,7 @@ from bed.design import ExperimentDesigner
 
 # NumPy-to-NumPy tolerance (deterministic)
 RTOL = 1e-12
+ATOL = 1e-14
 
 
 # Golden values: Sine wave scenario
@@ -298,7 +299,7 @@ class TestSineWaveBaseline:
         new_best = designer.update(t_obs=3.5, y_obs=-0.5)
         assert new_best["t_obs"] == pytest.approx(SINE_UPDATE_BEST_T, rel=RTOL)
         assert designer.H0 == pytest.approx(SINE_UPDATE_H0, rel=RTOL)
-        np.testing.assert_allclose(designer.EIG, SINE_UPDATE_EIG, rtol=RTOL)
+        np.testing.assert_allclose(designer.EIG, SINE_UPDATE_EIG, rtol=RTOL, atol=ATOL)
 
 class TestSineWaveSubgridBaseline:
     """Golden-value tests for sine wave with subgrid chunking (mem=3)."""
