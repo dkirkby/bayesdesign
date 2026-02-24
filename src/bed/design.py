@@ -142,12 +142,17 @@ class ExperimentDesigner:
         """Calculate the EIG using a posterior that is marginalized over the specified nuisance parameters."""
         if not self._initialized:
             raise RuntimeError("Must call calculateEIG before calculateMarginalEIG")
+        # Determine the parameters of interest (complement of nuisance params).
+        interest_params = tuple(
+            n for n in self.parameters.names if n not in nuisance_params
+        )
         # Calculate the marginal prior and its entropy.
         prior = self.parameters.sum(
             self.prior, axis_names=nuisance_params, keepdims=True
         )
         log2prior = np.log2(prior, out=np.zeros_like(prior), where=prior > 0)
-        H0 = -self.parameters.sum(prior * log2prior)
+        # Calculate the marginal prior entropy.
+        H0 = -self.parameters.sum(prior * log2prior, axis_names=interest_params)
         # Calculate the marginal posterior and the information gain.
         EIG = np.full(self.designs.shape, np.nan)
         for (s, mask) in self.designs.subgrid(self.design_subgrid):
@@ -168,7 +173,7 @@ class ExperimentDesigner:
                 )
                 # Calculate the information gain for all possible designs and measurements
                 log2post = np.log2(post, out=np.zeros_like(post), where=post > 0)
-                IG = H0 + self.parameters.sum(post * log2post)
+                IG = H0 + self.parameters.sum(post * log2post, axis_names=interest_params)
                 # Tabulate the expected information gain in bits.
                 EIG[mask] = self.features.sum(marginal * IG).flatten()
         del self._buffer
