@@ -119,6 +119,54 @@ class TestGrid(unittest.TestCase):
         z2 = (g2.x + g2.y + g2.z) * g2.u
         self.assertEqual(g1.sum(z1), g2.sum(z2))
 
+    def test_sum_marginalized_with_axis_names(self):
+        """Test that Grid.sum accepts marginalized values when axis_names specifies the non-marginalized axes."""
+        grid = Grid(x=np.arange(3), y=np.arange(4), z=np.arange(5))
+        values = np.ones(grid.shape)
+        # Marginalize over x and z, keeping dims.
+        marginal = grid.sum(values, axis_names=("x", "z"), keepdims=True)
+        self.assertEqual(marginal.shape, (1, 4, 1))
+        np.testing.assert_array_equal(marginal, np.full((1, 4, 1), 15))
+        # Sum the marginalized result over the remaining (interest) axis.
+        total = grid.sum(marginal, axis_names=("y",))
+        self.assertEqual(total, 60)
+
+    def test_sum_marginalized_in_stack(self):
+        """Test that Grid.sum accepts marginalized values with axis_names inside a GridStack."""
+        g1 = Grid(a=np.arange(2))
+        g2 = Grid(x=np.arange(3), y=np.arange(4))
+        with GridStack(g1, g2):
+            values = np.ones(g1.shape + g2.shape)  # (2, 3, 4)
+            # Marginalize g2 over x, keeping dims.
+            marginal = g2.sum(values, axis_names=("x",), keepdims=True)
+            self.assertEqual(marginal.shape, (2, 1, 4))
+            # Sum the marginalized result over the remaining axis.
+            total = g2.sum(marginal, axis_names=("y",))
+            self.assertEqual(total.shape, (2,))
+            np.testing.assert_array_equal(total, [12, 12])
+
+    def test_sum_marginalized_rejects_without_axis_names(self):
+        """Test that Grid.sum rejects marginalized values when axis_names is not specified."""
+        grid = Grid(x=np.arange(3), y=np.arange(4), z=np.arange(5))
+        marginal = grid.sum(np.ones(grid.shape), axis_names=("x", "z"), keepdims=True)
+        # Without axis_names, the full shape check is strict.
+        with self.assertRaises(ValueError):
+            grid.sum(marginal)
+
+    def test_sum_marginalized_rejects_bad_named_axis(self):
+        """Test that Grid.sum rejects marginalized values when a named axis has been marginalized."""
+        grid = Grid(x=np.arange(3), y=np.arange(4), z=np.arange(5))
+        marginal = grid.sum(np.ones(grid.shape), axis_names=("x",), keepdims=True)
+        # Trying to sum over x (which is now size 1) should fail.
+        with self.assertRaises(ValueError):
+            grid.sum(marginal, axis_names=("x",))
+
+    def test_sum_marginalized_rejects_wrong_ndim(self):
+        """Test that Grid.sum rejects values with wrong number of dimensions."""
+        grid = Grid(x=np.arange(3), y=np.arange(4))
+        with self.assertRaises(ValueError):
+            grid.sum(np.ones((3,)), axis_names=("x",))
+
     def test_sum_invalid(self):
         grid = Grid(x=np.arange(3), y=np.arange(4))
         with self.assertRaises(ValueError):
