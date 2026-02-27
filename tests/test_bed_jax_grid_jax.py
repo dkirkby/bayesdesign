@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 jax = pytest.importorskip("jax")
+jax.config.update("jax_enable_x64", True)
 jnp = pytest.importorskip("jax.numpy")
 
 from bed_jax.grid import CosineBump, Gaussian, Grid, TopHat
