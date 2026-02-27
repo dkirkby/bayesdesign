@@ -7,6 +7,7 @@ import numpy as np
 
 try:
     import jax
+    jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 except Exception as exc:  # pragma: no cover - import-time dependency guard
     raise ImportError(
