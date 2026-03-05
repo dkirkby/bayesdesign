@@ -313,9 +313,13 @@ class TestSineWaveBaseline:
         rtol = backend["rtol"]
         atol = backend["atol"]
 
-        designs = Grid(t_obs=np.linspace(0, 5, 51))
-        features = Grid(y_obs=np.linspace(-1.25, 1.25, 100))
-        params = Grid(amplitude=1, frequency=np.linspace(0.2, 2.0, 181), offset=0)
+        designs = Grid(t_obs=xp.linspace(0, 5, 51))
+        features = Grid(y_obs=xp.linspace(-1.25, 1.25, 100))
+        params = Grid(
+            amplitude=xp.asarray(1.0),
+            frequency=xp.linspace(0.2, 2.0, 181),
+            offset=xp.asarray(0.0),
+        )
 
         def unnorm_lfunc(params, features, designs, **kwargs):
             y_mean = params.amplitude * xp.sin(
@@ -331,7 +335,7 @@ class TestSineWaveBaseline:
             unnorm_lfunc,
             lfunc_args={"sigma_y": 0.1},
         )
-        prior = np.ones(params.shape)
+        prior = xp.ones(params.shape)
         prior = params.normalize(prior)
         designer.calculateEIG(prior)
 
@@ -414,9 +418,10 @@ class TestGridOpsBaseline:
 
     def test_tophat(self, backend):
         TopHat = backend["TopHat"]
+        xp = backend["xp"]
         rtol = backend["rtol"]
         atol = backend["atol"]
-        th = np.asarray(TopHat(np.linspace(0.2, 2.0, 181)))
+        th = np.asarray(TopHat(xp.linspace(0.2, 2.0, 181)))
         assert th.shape == (181,)
         assert th[0] == pytest.approx(0.0055248618784530384, rel=rtol)
         assert th[-1] == pytest.approx(0.0055248618784530384, rel=rtol)
@@ -425,9 +430,10 @@ class TestGridOpsBaseline:
 
     def test_cosine_bump(self, backend):
         CosineBump = backend["CosineBump"]
+        xp = backend["xp"]
         rtol = backend["rtol"]
         atol = backend["atol"]
-        cb = np.asarray(CosineBump(np.linspace(0.8, 1.2, 50)))
+        cb = np.asarray(CosineBump(xp.linspace(0.8, 1.2, 50)))
         assert cb.shape == (50,)
         assert cb[0] == pytest.approx(0.0, abs=1e-15)
         assert cb[-1] == pytest.approx(0.0, abs=1e-15)
@@ -437,9 +443,10 @@ class TestGridOpsBaseline:
 
     def test_gaussian(self, backend):
         Gaussian = backend["Gaussian"]
+        xp = backend["xp"]
         rtol = backend["rtol"]
         atol = backend["atol"]
-        g = np.asarray(Gaussian(np.linspace(-3, 3, 101), 0, 1))
+        g = np.asarray(Gaussian(xp.linspace(-3, 3, 101), 0, 1))
         assert g.shape == (101,)
         assert g[0] == pytest.approx(0.0002665618112378019, rel=rtol)
         assert g[50] == pytest.approx(0.023995129561898122, rel=rtol)
@@ -450,11 +457,12 @@ class TestGridOpsBaseline:
 
     def test_normalize(self, backend):
         Grid = backend["Grid"]
+        xp = backend["xp"]
         rtol = backend["rtol"]
         atol = backend["atol"]
-        grid = Grid(x=np.linspace(0, 1, 10))
-        vals = np.exp(-np.linspace(0, 1, 10)).reshape(grid.shape)
-        normed = vals.copy()
+        grid = Grid(x=xp.linspace(0, 1, 10))
+        vals = xp.exp(-xp.linspace(0, 1, 10)).reshape(grid.shape)
+        normed = vals
         normed = np.asarray(grid.normalize(normed))
         expected = np.array([
             0.15676741786282353, 0.14028164909912186, 0.12552953504145134,
@@ -469,8 +477,9 @@ class TestGridOpsBaseline:
 
     def test_partial_sum(self, backend):
         Grid = backend["Grid"]
+        xp = backend["xp"]
         rtol = backend["rtol"]
-        grid = Grid(x=np.arange(3), y=np.arange(4))
+        grid = Grid(x=xp.arange(3), y=xp.arange(4))
         vals = ((grid.x + 1) * (grid.y + 1)).astype(float)
         partial_x = np.asarray(grid.sum(vals, axis_names=("x",)))
         np.testing.assert_allclose(partial_x, [6.0, 12.0, 18.0, 24.0], rtol=rtol)

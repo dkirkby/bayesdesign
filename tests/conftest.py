@@ -66,9 +66,13 @@ def sine_wave_designer(backend):
     ExperimentDesigner = backend["ExperimentDesigner"]
     xp = backend["xp"]
 
-    designs = Grid(t_obs=np.linspace(0, 5, 51))
-    features = Grid(y_obs=np.linspace(-1.25, 1.25, 100))
-    params = Grid(amplitude=1, frequency=np.linspace(0.2, 2.0, 181), offset=0)
+    designs = Grid(t_obs=xp.linspace(0, 5, 51))
+    features = Grid(y_obs=xp.linspace(-1.25, 1.25, 100))
+    params = Grid(
+        amplitude=xp.asarray(1.0),
+        frequency=xp.linspace(0.2, 2.0, 181),
+        offset=xp.asarray(0.0),
+    )
 
     designer = ExperimentDesigner(
         params,
@@ -80,7 +84,7 @@ def sine_wave_designer(backend):
         lfunc_args={"sigma_y": 0.1},
     )
 
-    prior = np.ones(params.shape)
+    prior = xp.ones(params.shape)
     prior = params.normalize(prior)
     designer.calculateEIG(prior)
 
@@ -103,9 +107,13 @@ def sine_wave_designer_subgrid(backend):
     ExperimentDesigner = backend["ExperimentDesigner"]
     xp = backend["xp"]
 
-    designs = Grid(t_obs=np.linspace(0, 5, 51))
-    features = Grid(y_obs=np.linspace(-1.25, 1.25, 100))
-    params = Grid(amplitude=1, frequency=np.linspace(0.2, 2.0, 181), offset=0)
+    designs = Grid(t_obs=xp.linspace(0, 5, 51))
+    features = Grid(y_obs=xp.linspace(-1.25, 1.25, 100))
+    params = Grid(
+        amplitude=xp.asarray(1.0),
+        frequency=xp.linspace(0.2, 2.0, 181),
+        offset=xp.asarray(0.0),
+    )
 
     designer = ExperimentDesigner(
         params,
@@ -118,7 +126,7 @@ def sine_wave_designer_subgrid(backend):
         mem=3,
     )
 
-    prior = np.ones(params.shape)
+    prior = xp.ones(params.shape)
     prior = params.normalize(prior)
     designer.calculateEIG(prior)
 
@@ -142,12 +150,12 @@ def multi_param_designer(backend):
     ExperimentDesigner = backend["ExperimentDesigner"]
     xp = backend["xp"]
 
-    designs = Grid(t_obs=np.linspace(0, 4, 32))
-    features = Grid(y_obs=np.linspace(-1.4, 1.4, 40))
+    designs = Grid(t_obs=xp.linspace(0, 4, 32))
+    features = Grid(y_obs=xp.linspace(-1.4, 1.4, 40))
     params = Grid(
-        amplitude=np.linspace(0.5, 1.5, 11),
-        frequency=np.linspace(0.2, 2.0, 11),
-        offset=np.linspace(-0.5, 0.5, 11),
+        amplitude=xp.linspace(0.5, 1.5, 11),
+        frequency=xp.linspace(0.2, 2.0, 11),
+        offset=xp.linspace(-0.5, 0.5, 11),
     )
 
     def unnorm_lfunc(params, features, designs, **kwargs):
@@ -165,13 +173,13 @@ def multi_param_designer(backend):
         lfunc_args={"sigma_y": 0.1},
     )
 
-    prior_amp = TopHat(np.linspace(0.5, 1.5, 11))
-    prior_freq = TopHat(np.linspace(0.2, 2.0, 11))
-    prior_off = TopHat(np.linspace(-0.5, 0.5, 11))
+    prior_amp = TopHat(xp.linspace(0.5, 1.5, 11))
+    prior_freq = TopHat(xp.linspace(0.2, 2.0, 11))
+    prior_off = TopHat(xp.linspace(-0.5, 0.5, 11))
     prior = (
-        np.asarray(prior_amp).reshape(-1, 1, 1)
-        * np.asarray(prior_freq).reshape(1, -1, 1)
-        * np.asarray(prior_off).reshape(1, 1, -1)
+        xp.asarray(prior_amp).reshape(-1, 1, 1)
+        * xp.asarray(prior_freq).reshape(1, -1, 1)
+        * xp.asarray(prior_off).reshape(1, 1, -1)
     )
 
     designer.calculateEIG(prior)
