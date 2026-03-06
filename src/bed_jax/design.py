@@ -41,7 +41,10 @@ class ExperimentDesigner:
                 raise ValueError(
                     'device must be None, "cpu", "gpu", or a jax.Device instance'
                 )
-            devices = [d for d in jax.devices() if d.platform == requested]
+            try:
+                devices = jax.devices(requested)
+            except RuntimeError:
+                devices = []
             if not devices:
                 if requested == "gpu":
                     raise RuntimeError(

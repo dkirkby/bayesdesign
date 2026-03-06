@@ -24,7 +24,10 @@ def _is_jax_array(values):
 
 @pytest.fixture(params=["cpu", "gpu"], ids=["device=cpu", "device=gpu"])
 def target_device(request):
-    devices = [d for d in jax.devices() if d.platform == request.param]
+    try:
+        devices = jax.devices(request.param)
+    except RuntimeError:
+        devices = []
     if not devices:
         pytest.skip(f"No {request.param} device available.")
     return devices[0]
