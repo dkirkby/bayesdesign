@@ -35,6 +35,8 @@ setuptools.setup(
     install_requires=["numpy"],
     extras_require={
         "dev": ["check-manifest"],
+        "jax": ["jax>=0.4.0; python_version >= '3.10'"],
+        "jax-cpu": ["jax[cpu]>=0.4.0; python_version >= '3.10'"],
         # 'test': ['coverage'],
     },
     # entry_points={
