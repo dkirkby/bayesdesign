@@ -130,6 +130,26 @@ def test_grid_normalize_returns_jax_array():
     assert bool(jnp.isclose(jnp.sum(normed), 1.0, rtol=RTOL))
 
 
+def test_grid_device_placement(target_device):
+    grid = Grid(
+        device=target_device.platform,
+        x=jnp.array([1.0, 2.0, 3.0]),
+        y=jnp.array([4.0, 5.0]),
+    )
+    assert grid.device.platform == target_device.platform
+    for name in grid.names:
+        assert grid.axes_in[name].device.platform == target_device.platform
+
+    # Operations should preserve device placement.
+    with jax.default_device(target_device):
+        values = jnp.ones(grid.shape)
+    normed = grid.normalize(values)
+    assert normed.device.platform == target_device.platform
+
+    summed = grid.sum(values)
+    assert summed.device.platform == target_device.platform
+
+
 def test_designer_structural_init_and_core_methods():
     params = Grid(p=jnp.array([0.0, 1.0]))
     features = Grid(y=jnp.array([0.0, 1.0]))
@@ -201,7 +221,7 @@ def test_designer_requested_device_mismatch_raises():
     params = Grid(device="cpu", p=jnp.array([0.0, 1.0]))
     features = Grid(device="cpu", y=jnp.array([0.0, 1.0]))
     designs = Grid(device="cpu", t=jnp.array([0.0, 1.0]))
-    with pytest.raises(ValueError, match="does not match grid devices"):
+    with pytest.raises(ValueError, match="does not match ExperimentDesigner device"):
         ExperimentDesigner(
             params,
             features,
