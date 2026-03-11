@@ -222,6 +222,34 @@ MULTI_EIG = np.array([
 ])
 MULTI_BEST_T = 2.838709677419355
 MULTI_POST_MAX = 0.00752323574371786
+# Marginal EIG: frequency only (marginalize amplitude, offset)
+MULTI_MARGINAL_EIG_FREQ = np.array([
+    0.28154021841853893, 0.27865782115326676, 0.2707221557231907,
+    0.26213732637177156, 0.2796309754126123, 0.3512816295930892,
+    0.407523119950886, 0.4092269614962831, 0.3830970618806127,
+    0.38166526802836476, 0.4025798280515918, 0.4408047943694759,
+    0.4963066983861221, 0.5712213947486151, 0.6623423373572797,
+    0.7676048158213157, 0.8748917317347256, 0.9716302982371806,
+    1.050436404574421, 1.1002809734335173, 1.1252863159642428,
+    1.1304154896639482, 1.1174909022233181, 1.0971027940729536,
+    1.0731960709788202, 1.0532997031548876, 1.0451372722485286,
+    1.0479112428938369, 1.0580718078292988, 1.0745949046761991,
+    1.0891076717095587, 1.0926215151252725,
+])
+# Marginal EIG: amplitude+frequency (marginalize offset)
+MULTI_MARGINAL_EIG_AMPFREQ = np.array([
+    0.4674973755696744, 0.4712371933166322, 0.4843695877644853,
+    0.5151537063930843, 0.596946737852933, 0.7597659685851105,
+    0.9298697014380787, 1.0364258990376876, 1.0831162530929204,
+    1.117402909685385, 1.146563853671102, 1.1787830960826298,
+    1.2221966910608553, 1.284670399573949, 1.3660259623944488,
+    1.4656781984191525, 1.5747157920826051, 1.6790871734041868,
+    1.7726257970226922, 1.8293391816095934, 1.8648994700957506,
+    1.8644488985938916, 1.850524221906898, 1.8184222200855626,
+    1.7862190805792495, 1.763617222130464, 1.7432493156985132,
+    1.7423387030410014, 1.7609566907423324, 1.7829873369847982,
+    1.7987105808624382, 1.8047505189978041,
+])
 
 class TestSineWaveBaseline:
     """Golden-value tests for the sine wave (1D frequency) scenario."""
@@ -344,29 +372,19 @@ class TestMultiParamBaseline:
         assert post.max() == pytest.approx(MULTI_POST_MAX, rel=RTOL)
         assert params.sum(post) == pytest.approx(1.0, rel=1e-10)
 
-    @pytest.mark.xfail(
-        reason="calculateMarginalEIG has a shape mismatch bug with multi-dim params "
-               "(marginal prior shape not compatible with parameters.sum). "
-               "See issue: H0 computation fails when prior is reduced by partial sum.",
-        strict=True,
-    )
     def test_marginal_EIG(self, multi_param_designer):
         # JAX target: rtol=1e-7 (float64) or rtol=1e-3 (float32)
         designer = multi_param_designer["designer"]
         marginal_eig = designer.calculateMarginalEIG("amplitude", "offset")
-        assert marginal_eig.shape == (32,)
+        np.testing.assert_allclose(marginal_eig, MULTI_MARGINAL_EIG_FREQ, rtol=RTOL)
+        assert np.all(marginal_eig <= designer.EIG + 1e-10)
 
-    @pytest.mark.xfail(
-        reason="calculateMarginalEIG has a shape mismatch bug with multi-dim params "
-               "(marginal prior shape not compatible with parameters.sum). "
-               "See issue: H0 computation fails when prior is reduced by partial sum.",
-        strict=True,
-    )
     def test_marginal_EIG_single_nuisance(self, multi_param_designer):
         # JAX target: rtol=1e-7 (float64) or rtol=1e-3 (float32)
         designer = multi_param_designer["designer"]
         marginal_eig = designer.calculateMarginalEIG("offset")
-        assert marginal_eig.shape == (32,)
+        np.testing.assert_allclose(marginal_eig, MULTI_MARGINAL_EIG_AMPFREQ, rtol=RTOL)
+        assert np.all(marginal_eig <= designer.EIG + 1e-10)
 
 class TestGridOpsBaseline:
     """Golden-value tests for Grid utility functions."""

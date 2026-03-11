@@ -135,24 +135,33 @@ class Grid:
         axis1 = self._stack_offset
         axis2 = axis1 + len(self.shape)
         sum_shape = values.shape[axis1:axis2]
-        if sum_shape != self.shape:
-            raise ValueError(
-                f"values shape {values.shape} is not compatible with grid shape {self.shape}"
-            )
         if axis_names is None:
-            # Use all axes by default
+            # Use all axes by default.
+            if sum_shape != self.shape:
+                raise ValueError(
+                    f"values shape {values.shape} is not compatible with grid shape {self.shape}"
+                )
             axes = tuple(range(axis1, axis2))
             if self.constraint is not None:
                 # Multiply by constraint weights. Avoid *= so we don't modify the input.
                 values = values * self.constraint_weights
         else:
-            # Check for valid axis names
+            # Check for valid axis names and that the named axes have compatible sizes.
             try:
                 axes = tuple(
                     [self.names.index(name) + self._stack_offset for name in axis_names]
                 )
             except ValueError:
                 raise ValueError(f"Invalid axis_names: {axis_names}")
+                
+            if len(sum_shape) != len(self.shape) or any(
+                sum_shape[self.names.index(name)] != self.shape[self.names.index(name)]
+                for name in axis_names
+            ):
+                raise ValueError(
+                    f"values shape {values.shape} is not compatible with grid shape {self.shape}"
+                )
+
             if self.constraint is not None:
                 if values.shape != self.shape:
                     raise NotImplementedError(
@@ -165,6 +174,19 @@ class Grid:
 
         if verbose:
             print(f"sum: shape={values.shape} axes={axes}, keepdims={keepdims}")
+            
+        if sum_shape != self.shape:
+            # Summing specific axis_names: use keepdims=True internally, 
+            # then squeeze axes that are size 1 but not naturally single-value axes
+            result = np.sum(values, axis=axes, keepdims=True)
+            if not keepdims:
+                squeeze_axes = tuple(
+                    axis1 + i for i in range(len(self.shape))
+                    if result.shape[axis1 + i] == 1 and self.shape[i] != 1
+                )
+                if squeeze_axes:
+                    result = result.squeeze(axis=squeeze_axes)
+            return result
         return np.sum(values, axis=axes, keepdims=keepdims)
 
     def normalize(self, values):
