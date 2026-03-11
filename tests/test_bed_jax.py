@@ -51,6 +51,7 @@ def test_grid_signatures():
         "self",
         "constraint",
         "full_shape",
+        "device",
         "axes",
     ]
     assert init_sig.parameters["axes"].kind == inspect.Parameter.VAR_KEYWORD
@@ -156,22 +157,14 @@ def test_designer_structural_init_and_core_methods():
     assert "t" in updated_best
 
 
-def test_grid_place_on_device(target_device):
-    grid = Grid(
-        x=jnp.arange(3),
-        y=jnp.arange(4),
-        constraint=lambda x, y: x + y < 3,
-    )
-    grid._place_on_device(target_device)
-    assert grid.x.device.platform == target_device.platform
-    assert grid.y.device.platform == target_device.platform
-    assert grid.constraint_eval.device.platform == target_device.platform
-
-
 def test_designer_methods_run_on_selected_device(target_device):
-    params = Grid(p=jnp.array([0.0, 1.0]), q=jnp.array([0.0, 1.0]))
-    features = Grid(y=jnp.array([0.0, 1.0]))
-    designs = Grid(t=jnp.array([0.0, 1.0]))
+    params = Grid(
+        device=target_device.platform,
+        p=jnp.array([0.0, 1.0]),
+        q=jnp.array([0.0, 1.0]),
+    )
+    features = Grid(device=target_device.platform, y=jnp.array([0.0, 1.0]))
+    designs = Grid(device=target_device.platform, t=jnp.array([0.0, 1.0]))
     designer = ExperimentDesigner(
         params,
         features,
@@ -195,6 +188,28 @@ def test_designer_methods_run_on_selected_device(target_device):
     updated_best = designer.update(t=0.0, y=0.0)
     assert "t" in updated_best
     assert designer.EIG.device.platform == target_device.platform
+
+
+def test_designer_requested_device_mismatch_raises():
+    try:
+        gpu_devices = jax.devices("gpu")
+    except RuntimeError:
+        gpu_devices = []
+    if not gpu_devices:
+        pytest.skip("No GPU backend available for mismatch test.")
+
+    params = Grid(device="cpu", p=jnp.array([0.0, 1.0]))
+    features = Grid(device="cpu", y=jnp.array([0.0, 1.0]))
+    designs = Grid(device="cpu", t=jnp.array([0.0, 1.0]))
+    with pytest.raises(ValueError, match="does not match grid devices"):
+        ExperimentDesigner(
+            params,
+            features,
+            designs,
+            _dummy_lfunc,
+            lfunc_args={"sigma_y": 0.25},
+            device="gpu",
+        )
 
 
 def test_designer_invalid_device_selection():
@@ -231,7 +246,8 @@ def test_designer_gpu_requested_without_gpu_errors():
 
 
 def test_tophat_runs_on_selected_device(target_device):
-    x = jax.device_put(jnp.linspace(0.2, 2.0, 181), device=target_device)
+    with jax.default_device(target_device):
+        x = jnp.linspace(0.2, 2.0, 181)
     y = TopHat(x)
     assert y.device.platform == target_device.platform
     assert bool(jnp.isclose(jnp.sum(y), 1.0, rtol=RTOL))

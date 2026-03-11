@@ -14,21 +14,24 @@ except Exception as exc:  # pragma: no cover - import-time dependency guard
         "or `pip install -e '.[jax]'."
     ) from exc
 
-
-def _shape_prod(shape):
-    return math.prod(int(s) for s in shape)
+from .util import resolve_device
 
 
 class Grid:
 
-    def __init__(self, constraint=None, full_shape=None, **axes):
+    def __init__(self, constraint=None, full_shape=None, device=None, **axes):
+        self.device = resolve_device(device)
         self.axes = {}
         self.axes_in = {}
         naxes = len(axes)
         for offset, name in enumerate(axes):
-            axis = jnp.atleast_1d(jnp.asarray(axes[name]))
+            # Check for a valid axis definition.
+            with jax.default_device(self.device):
+                axis = jnp.atleast_1d(jnp.asarray(axes[name]))
+            # Store the axis offset to its position in the grid.
             shape = [1] * offset + [-1] + [1] * (naxes - offset - 1)
             self.axes[name] = axis.reshape(shape)
+            # Remember the original axis definition.
             self.axes_in[name] = axis
 
         self.names = tuple(self.axes.keys())
@@ -36,6 +39,7 @@ class Grid:
         self.expanded_shape = tuple(self.shape)
         self.constraint = constraint
 
+        # Check for a constraint function.
         if constraint is not None:
             if not inspect.isfunction(constraint):
                 raise ValueError("constraint must be a callable function")
@@ -50,6 +54,7 @@ class Grid:
                 if name not in self.names and name != "idx" and name != "kwargs":
                     raise ValueError("constraint uses an invalid axis name: " + name)
 
+            # Evaluate the constraint function on the full grid.
             self.constraint_args = {
                 name: self.axes[name] for name in constraint_names if name in self.axes
             }
@@ -58,15 +63,17 @@ class Grid:
                     raise ValueError(
                         "full_shape is required when constraint uses idx"
                     )
-                self.constraint_args["idx"] = jnp.arange(
-                    _shape_prod(full_shape)
-                ).reshape(full_shape)
+                with jax.default_device(self.device):
+                    idx = jnp.arange(math.prod(full_shape)).reshape(full_shape)
+                self.constraint_args["idx"] = idx
 
-            constraint_eval = jnp.asarray(constraint(**self.constraint_args))
+            with jax.default_device(self.device):
+                constraint_eval = jnp.asarray(constraint(**self.constraint_args))
             self.constraint_eval = constraint_eval
             if bool(jnp.any(constraint_eval < 0)):
                 raise ValueError("constraint must be non-negative")
 
+            # Replace constrained axes with the reduced set of values.
             if "idx" in constraint_names:
                 squeezed = jnp.squeeze(constraint_eval)
                 nonzero = jnp.nonzero(squeezed)
@@ -110,6 +117,8 @@ class Grid:
                 weights_shape
             )
 
+            # Compute and save indices needed to expand arrays tabulated on
+            # the reduced grid.
             self.constraint_offsets = tuple(constraint_offsets)
             self.constraint_indices = list(jnp.nonzero(constraint_eval))
             for offset in range(naxes):
@@ -117,6 +126,7 @@ class Grid:
                     self.constraint_indices[offset] = slice(None)
 
         self.shape = tuple(self.shape)
+        # Initialize data used to implement GridStack.
         self._stack_offset = 0
         self._stack_pad = 0
 
@@ -140,42 +150,6 @@ class Grid:
         axis = self.axes[name]
         return axis.reshape(axis.shape + tuple([1] * self._stack_pad))
 
-    def _place_on_device(self, device):
-        """Move grid-backed arrays onto a target JAX device in place."""
-        if device is None:
-            return self
-
-        def move(value):
-            return jax.device_put(jnp.asarray(value), device)
-
-        for attr in ("axes", "axes_in", "constraint_args"):
-            if attr not in self.__dict__:
-                continue
-            mapping = getattr(self, attr)
-            if not isinstance(mapping, dict):
-                continue
-            for key, value in list(mapping.items()):
-                try:
-                    mapping[key] = move(value)
-                except Exception:
-                    # Keep non-array metadata (e.g., slices) unchanged.
-                    mapping[key] = value
-
-        for attr in ("constraint_eval", "constraint_weights"):
-            if attr in self.__dict__:
-                setattr(self, attr, move(getattr(self, attr)))
-
-        if "constraint_indices" in self.__dict__:
-            moved = []
-            for index in self.constraint_indices:
-                if isinstance(index, slice):
-                    moved.append(index)
-                else:
-                    moved.append(move(index))
-            self.constraint_indices = moved
-
-        return self
-
     def expand(self, values, missing=jnp.nan):
         """Expand an array of values to the full grid shape.
 
@@ -192,8 +166,10 @@ class Grid:
             return values
 
         fill_dtype = jnp.result_type(values.dtype, jnp.asarray(missing).dtype)
-        expanded = jnp.full(self.expanded_shape, missing, dtype=fill_dtype)
+        with jax.default_device(self.device):
+            expanded = jnp.full(self.expanded_shape, missing, dtype=fill_dtype)
 
+        # This implementation is slow since it does explicit looping.
         axis0 = self.constraint_offsets[0]
         for ii in itertools.product(*(range(dim) for dim in self.shape)):
             i0 = ii[axis0]
@@ -226,14 +202,18 @@ class Grid:
         sum_shape = values.shape[axis1:axis2]
 
         if axis_names is None:
+            # Use all axes by default.
             if sum_shape != self.shape:
                 raise ValueError(
                     f"values shape {values.shape} is not compatible with grid shape {self.shape}"
                 )
             axes = tuple(range(axis1, axis2))
             if self.constraint is not None:
+                # Multiply by constraint weights. Avoid *= so we do not
+                # modify the input array.
                 values = values * jnp.asarray(self.constraint_weights)
         else:
+            # Check for valid axis names and named-axis compatible sizes.
             try:
                 axes = tuple(
                     [self.names.index(name) + self._stack_offset for name in axis_names]
@@ -255,13 +235,19 @@ class Grid:
                     raise NotImplementedError(
                         "sum() with axis_names, constraint and GridStack not implemented"
                     )
+                # Multiply by constraint weights. Avoid *= so we do not
+                # modify the input array.
                 values = values * jnp.asarray(self.constraint_weights)
+                # Expand the weighted values.
                 values = self.expand(values, missing=0.0)
 
         if verbose:
             print(f"sum: shape={values.shape} axes={axes}, keepdims={keepdims}")
 
         if sum_shape != self.shape:
+            # Summing specific axis_names: use keepdims=True internally,
+            # then squeeze axes that are size 1 but not naturally
+            # single-value axes.
             result = jnp.sum(values, axis=axes, keepdims=True)
             if not keepdims:
                 squeeze_axes = tuple(
@@ -315,7 +301,8 @@ class Grid:
         return out
 
     def subgrid(self, N):
-        total_size = _shape_prod(self.shape)
+        total_size = math.prod(self.shape)
+        # Check that N is a positive integer.
         if not isinstance(N, int) or N <= 0:
             raise ValueError("N must be an integer")
 
@@ -326,7 +313,10 @@ class Grid:
                 & (idx < (_i + 1) * _N)
             )
             subgrid = Grid(
-                **self.axes, constraint=constraint_func, full_shape=self.shape
+                **self.axes,
+                constraint=constraint_func,
+                full_shape=self.shape,
+                device=self.device,
             )
             yield subgrid, subgrid.constraint_eval
 
