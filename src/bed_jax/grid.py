@@ -196,76 +196,78 @@ class Grid:
 
         Used for marginalization and to implement our normalize() method.
         """
-        values = jnp.asarray(values)
-        axis1 = self._stack_offset
-        axis2 = axis1 + len(self.shape)
-        sum_shape = values.shape[axis1:axis2]
+        with jax.default_device(self.device):
+            values = jnp.asarray(values)
+            axis1 = self._stack_offset
+            axis2 = axis1 + len(self.shape)
+            sum_shape = values.shape[axis1:axis2]
 
-        if axis_names is None:
-            # Use all axes by default.
-            if sum_shape != self.shape:
-                raise ValueError(
-                    f"values shape {values.shape} is not compatible with grid shape {self.shape}"
-                )
-            axes = tuple(range(axis1, axis2))
-            if self.constraint is not None:
-                # Multiply by constraint weights. Avoid *= so we do not
-                # modify the input array.
-                values = values * jnp.asarray(self.constraint_weights)
-        else:
-            # Check for valid axis names and named-axis compatible sizes.
-            try:
-                axes = tuple(
-                    [self.names.index(name) + self._stack_offset for name in axis_names]
-                )
-            except ValueError as exc:
-                raise ValueError(f"Invalid axis_names: {axis_names}") from exc
-
-            if len(sum_shape) != len(self.shape) or any(
-                sum_shape[self.names.index(name)]
-                != self.shape[self.names.index(name)]
-                for name in axis_names
-            ):
-                raise ValueError(
-                    f"values shape {values.shape} is not compatible with grid shape {self.shape}"
-                )
-
-            if self.constraint is not None:
-                if tuple(values.shape) != self.shape:
-                    raise NotImplementedError(
-                        "sum() with axis_names, constraint and GridStack not implemented"
+            if axis_names is None:
+                # Use all axes by default.
+                if sum_shape != self.shape:
+                    raise ValueError(
+                        f"values shape {values.shape} is not compatible with grid shape {self.shape}"
                     )
-                # Multiply by constraint weights. Avoid *= so we do not
-                # modify the input array.
-                values = values * jnp.asarray(self.constraint_weights)
-                # Expand the weighted values.
-                values = self.expand(values, missing=0.0)
+                axes = tuple(range(axis1, axis2))
+                if self.constraint is not None:
+                    # Multiply by constraint weights. Avoid *= so we do not
+                    # modify the input array.
+                    values = values * jnp.asarray(self.constraint_weights)
+            else:
+                # Check for valid axis names and named-axis compatible sizes.
+                try:
+                    axes = tuple(
+                        [self.names.index(name) + self._stack_offset for name in axis_names]
+                    )
+                except ValueError as exc:
+                    raise ValueError(f"Invalid axis_names: {axis_names}") from exc
 
-        if verbose:
-            print(f"sum: shape={values.shape} axes={axes}, keepdims={keepdims}")
+                if len(sum_shape) != len(self.shape) or any(
+                    sum_shape[self.names.index(name)]
+                    != self.shape[self.names.index(name)]
+                    for name in axis_names
+                ):
+                    raise ValueError(
+                        f"values shape {values.shape} is not compatible with grid shape {self.shape}"
+                    )
 
-        if sum_shape != self.shape:
-            # Summing specific axis_names: use keepdims=True internally,
-            # then squeeze axes that are size 1 but not naturally
-            # single-value axes.
-            result = jnp.sum(values, axis=axes, keepdims=True)
-            if not keepdims:
-                squeeze_axes = tuple(
-                    axis1 + i
-                    for i in range(len(self.shape))
-                    if result.shape[axis1 + i] == 1 and self.shape[i] != 1
-                )
-                if squeeze_axes:
-                    result = jnp.squeeze(result, axis=squeeze_axes)
-            return result
+                if self.constraint is not None:
+                    if tuple(values.shape) != self.shape:
+                        raise NotImplementedError(
+                            "sum() with axis_names, constraint and GridStack not implemented"
+                        )
+                    # Multiply by constraint weights. Avoid *= so we do not
+                    # modify the input array.
+                    values = values * jnp.asarray(self.constraint_weights)
+                    # Expand the weighted values.
+                    values = self.expand(values, missing=0.0)
 
-        return jnp.sum(values, axis=axes, keepdims=keepdims)
+            if verbose:
+                print(f"sum: shape={values.shape} axes={axes}, keepdims={keepdims}")
+
+            if sum_shape != self.shape:
+                # Summing specific axis_names: use keepdims=True internally,
+                # then squeeze axes that are size 1 but not naturally
+                # single-value axes.
+                result = jnp.sum(values, axis=axes, keepdims=True)
+                if not keepdims:
+                    squeeze_axes = tuple(
+                        axis1 + i
+                        for i in range(len(self.shape))
+                        if result.shape[axis1 + i] == 1 and self.shape[i] != 1
+                    )
+                    if squeeze_axes:
+                        result = jnp.squeeze(result, axis=squeeze_axes)
+                return result
+
+            return jnp.sum(values, axis=axes, keepdims=keepdims)
 
     def normalize(self, values):
         """Normalize the array values over our grid."""
-        values = jnp.asarray(values)
-        norm = self.sum(values, keepdims=True)
-        return values / norm
+        with jax.default_device(self.device):
+            values = jnp.asarray(values)
+            norm = self.sum(values, keepdims=True)
+            return values / norm
 
     def extent(self, name):
         """Return the (min,max) extent of the named axis.
@@ -361,8 +363,9 @@ def TopHat(x):
     x = jnp.asarray(x)
     if not bool(jnp.all(jnp.diff(x) > 0)):
         raise ValueError("x must be monotonically increasing")
-    y = jnp.ones_like(x)
-    y = y / jnp.sum(y)
+    with jax.default_device(x.device):
+        y = jnp.ones_like(x)
+        y = y / jnp.sum(y)
     return y
 
 

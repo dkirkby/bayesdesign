@@ -302,12 +302,12 @@ class ExperimentDesigner:
                     **self.lfunc_args,
                 )
             )
-        self._buffer = self._buffer * self.prior
-        post_norm = self.parameters.sum(self._buffer, keepdims=True)
-        self._buffer = jnp.where(
-            post_norm > 0, self._buffer / post_norm, self._buffer
-        )
-        self._buffer = jnp.where(post_norm == 0, self.prior, self._buffer)
+            self._buffer = self._buffer * self.prior
+            post_norm = self.parameters.sum(self._buffer, keepdims=True)
+            self._buffer = jnp.where(
+                post_norm > 0, self._buffer / post_norm, self._buffer
+            )
+            self._buffer = jnp.where(post_norm == 0, self.prior, self._buffer)
         return self._buffer
 
     def update(self, **design_and_features):
