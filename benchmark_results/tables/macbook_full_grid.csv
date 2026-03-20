@@ -1,0 +1,23 @@
+table_name,measure,curve_family,series_key,series_label,x_label,x_value,backend_key,backend_label,device_kind,total_elapsed_s,call_elapsed_s,peak_rss_mb,design_points_1d,subgrid_mem_mb
+macbook_results,full_grid,1d,1d_full_grid,1D sine wave,Frequency grid points,50,numpy,NumPy,host,0.13399729199591093,0.008153167000273243,47.078125,51,50.0
+macbook_results,full_grid,1d,1d_full_grid,1D sine wave,Frequency grid points,50,jax_cpu,JAX CPU,cpu,2.8256199579918757,1.9977170829952229,292.796875,51,50.0
+macbook_results,full_grid,1d,1d_full_grid,1D sine wave,Frequency grid points,500,numpy,NumPy,host,0.19819083300535567,0.06878158400650136,136.578125,51,50.0
+macbook_results,full_grid,1d,1d_full_grid,1D sine wave,Frequency grid points,500,jax_cpu,JAX CPU,cpu,2.497077875013929,1.6500285000074655,360.265625,51,50.0
+macbook_results,full_grid,1d,1d_full_grid,1D sine wave,Frequency grid points,1500,numpy,NumPy,host,0.33675145800225437,0.20219458299106918,337.953125,51,50.0
+macbook_results,full_grid,1d,1d_full_grid,1D sine wave,Frequency grid points,1500,jax_cpu,JAX CPU,cpu,2.3885916250001173,1.5692100419837516,519.640625,51,50.0
+macbook_results,full_grid,1d,1d_full_grid,1D sine wave,Frequency grid points,5000,numpy,NumPy,host,0.8035050840117037,0.6730137499980628,1037.265625,51,50.0
+macbook_results,full_grid,1d,1d_full_grid,1D sine wave,Frequency grid points,5000,jax_cpu,JAX CPU,cpu,2.4584533750021365,1.624089917022502,842.296875,51,50.0
+macbook_results,full_grid,1d,1d_full_grid,1D sine wave,Frequency grid points,10000,numpy,NumPy,host,1.7376555830123834,1.470022749999771,2040.140625,51,50.0
+macbook_results,full_grid,1d,1d_full_grid,1D sine wave,Frequency grid points,10000,jax_cpu,JAX CPU,cpu,2.6522381250106264,1.7327560420089867,1429.921875,51,50.0
+macbook_results,full_grid,1d,1d_full_grid,1D sine wave,Frequency grid points,20000,numpy,NumPy,host,3.552723667002283,3.4264512920053676,3854.625,51,50.0
+macbook_results,full_grid,1d,1d_full_grid,1D sine wave,Frequency grid points,20000,jax_cpu,JAX CPU,cpu,2.9306237919954583,2.0084759579913225,2302.203125,51,50.0
+macbook_results,full_grid,3d,3d_full_grid,3D sine wave,Points per parameter axis,5,numpy,NumPy,host,0.12778058397816494,0.00444212497677654,42.140625,51,50.0
+macbook_results,full_grid,3d,3d_full_grid,3D sine wave,Points per parameter axis,5,jax_cpu,JAX CPU,cpu,2.2860789579863194,1.4205330830009189,288.859375,51,50.0
+macbook_results,full_grid,3d,3d_full_grid,3D sine wave,Points per parameter axis,10,numpy,NumPy,host,0.15086462500039488,0.03190120798535645,84.53125,51,50.0
+macbook_results,full_grid,3d,3d_full_grid,3D sine wave,Points per parameter axis,10,jax_cpu,JAX CPU,cpu,2.3793948750244454,1.4908757079974748,313.484375,51,50.0
+macbook_results,full_grid,3d,3d_full_grid,3D sine wave,Points per parameter axis,20,numpy,NumPy,host,0.3864429169916548,0.258206667000195,447.328125,51,50.0
+macbook_results,full_grid,3d,3d_full_grid,3D sine wave,Points per parameter axis,20,jax_cpu,JAX CPU,cpu,2.602264084009221,1.711517834017286,524.9375,51,50.0
+macbook_results,full_grid,3d,3d_full_grid,3D sine wave,Points per parameter axis,30,numpy,NumPy,host,1.0651955420034938,0.9407698750146665,1420.84375,51,50.0
+macbook_results,full_grid,3d,3d_full_grid,3D sine wave,Points per parameter axis,30,jax_cpu,JAX CPU,cpu,2.7668470829958096,1.8876441250031348,1052.671875,51,50.0
+macbook_results,full_grid,3d,3d_full_grid,3D sine wave,Points per parameter axis,50,numpy,NumPy,host,7.545284541993169,7.420859250007197,3774.0,51,50.0
+macbook_results,full_grid,3d,3d_full_grid,3D sine wave,Points per parameter axis,50,jax_cpu,JAX CPU,cpu,4.125056916993344,3.117574957985198,3952.765625,51,50.0

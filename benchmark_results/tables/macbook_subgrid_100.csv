@@ -1,0 +1,23 @@
+table_name,measure,curve_family,series_key,series_label,x_label,x_value,backend_key,backend_label,device_kind,total_elapsed_s,call_elapsed_s,peak_rss_mb,design_points_1d,subgrid_mem_mb
+macbook_results,subgrid_100,1d,1d_subgrid_mem_100,1D sine wave (subgrid 100 MiB),Frequency grid points,50,numpy,NumPy,host,0.13632908297586255,0.007960792019730434,49.75,51,100.0
+macbook_results,subgrid_100,1d,1d_subgrid_mem_100,1D sine wave (subgrid 100 MiB),Frequency grid points,50,jax_cpu,JAX CPU,cpu,2.8594954590080306,2.023015208018478,288.828125,51,100.0
+macbook_results,subgrid_100,1d,1d_subgrid_mem_100,1D sine wave (subgrid 100 MiB),Frequency grid points,500,numpy,NumPy,host,0.19813133400748484,0.06873154200729914,136.84375,51,100.0
+macbook_results,subgrid_100,1d,1d_subgrid_mem_100,1D sine wave (subgrid 100 MiB),Frequency grid points,500,jax_cpu,JAX CPU,cpu,2.370992666023085,1.5578510409977753,360.203125,51,100.0
+macbook_results,subgrid_100,1d,1d_subgrid_mem_100,1D sine wave (subgrid 100 MiB),Frequency grid points,1500,numpy,NumPy,host,0.3349770840140991,0.19963245899998583,334.703125,51,100.0
+macbook_results,subgrid_100,1d,1d_subgrid_mem_100,1D sine wave (subgrid 100 MiB),Frequency grid points,1500,jax_cpu,JAX CPU,cpu,2.7689492919889744,1.9367872500151861,601.3125,51,100.0
+macbook_results,subgrid_100,1d,1d_subgrid_mem_100,1D sine wave (subgrid 100 MiB),Frequency grid points,5000,numpy,NumPy,host,0.7530389160092454,0.6185068339982536,305.9375,51,100.0
+macbook_results,subgrid_100,1d,1d_subgrid_mem_100,1D sine wave (subgrid 100 MiB),Frequency grid points,5000,jax_cpu,JAX CPU,cpu,2.7978864159958903,1.9694024159980472,602.0,51,100.0
+macbook_results,subgrid_100,1d,1d_subgrid_mem_100,1D sine wave (subgrid 100 MiB),Frequency grid points,10000,numpy,NumPy,host,1.4343888329749461,1.294860666996101,402.125,51,100.0
+macbook_results,subgrid_100,1d,1d_subgrid_mem_100,1D sine wave (subgrid 100 MiB),Frequency grid points,10000,jax_cpu,JAX CPU,cpu,2.942887665994931,2.091199541988317,582.28125,51,100.0
+macbook_results,subgrid_100,1d,1d_subgrid_mem_100,1D sine wave (subgrid 100 MiB),Frequency grid points,20000,numpy,NumPy,host,2.5890932920156047,2.459227416984504,298.953125,51,100.0
+macbook_results,subgrid_100,1d,1d_subgrid_mem_100,1D sine wave (subgrid 100 MiB),Frequency grid points,20000,jax_cpu,JAX CPU,cpu,3.18889362498885,2.3542856659914833,582.125,51,100.0
+macbook_results,subgrid_100,3d,3d_subgrid_mem_100,3D sine wave (subgrid 100 MiB),Points per parameter axis,5,numpy,NumPy,host,0.14809608302311972,0.005496166995726526,45.3125,51,100.0
+macbook_results,subgrid_100,3d,3d_subgrid_mem_100,3D sine wave (subgrid 100 MiB),Points per parameter axis,5,jax_cpu,JAX CPU,cpu,2.5957607080054004,1.5175858339935075,291.203125,51,100.0
+macbook_results,subgrid_100,3d,3d_subgrid_mem_100,3D sine wave (subgrid 100 MiB),Points per parameter axis,10,numpy,NumPy,host,0.15085041700513102,0.03157537500374019,86.109375,51,100.0
+macbook_results,subgrid_100,3d,3d_subgrid_mem_100,3D sine wave (subgrid 100 MiB),Points per parameter axis,10,jax_cpu,JAX CPU,cpu,2.7020277500269003,1.6961367079929914,313.953125,51,100.0
+macbook_results,subgrid_100,3d,3d_subgrid_mem_100,3D sine wave (subgrid 100 MiB),Points per parameter axis,20,numpy,NumPy,host,0.3922817919810768,0.26021087501430884,294.6875,51,100.0
+macbook_results,subgrid_100,3d,3d_subgrid_mem_100,3D sine wave (subgrid 100 MiB),Points per parameter axis,20,jax_cpu,JAX CPU,cpu,3.06141112500336,2.13201066700276,505.046875,51,100.0
+macbook_results,subgrid_100,3d,3d_subgrid_mem_100,3D sine wave (subgrid 100 MiB),Points per parameter axis,30,numpy,NumPy,host,1.0281320830108598,0.8923912500031292,387.734375,51,100.0
+macbook_results,subgrid_100,3d,3d_subgrid_mem_100,3D sine wave (subgrid 100 MiB),Points per parameter axis,30,jax_cpu,JAX CPU,cpu,3.333064958016621,2.37867695800378,510.921875,51,100.0
+macbook_results,subgrid_100,3d,3d_subgrid_mem_100,3D sine wave (subgrid 100 MiB),Points per parameter axis,50,numpy,NumPy,host,4.010648458002834,3.875891458010301,256.84375,51,100.0
+macbook_results,subgrid_100,3d,3d_subgrid_mem_100,3D sine wave (subgrid 100 MiB),Points per parameter axis,50,jax_cpu,JAX CPU,cpu,4.568636124982731,3.5547992499778047,521.625,51,100.0
