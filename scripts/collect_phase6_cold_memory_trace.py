@@ -181,7 +181,20 @@ def run_worker(args):
     designer.calculateEIG(prior)
     _block_if_jax(backend, designer.EIG)
     elapsed = time.perf_counter() - t0
-    print(json.dumps({"status": "done", "call_elapsed_s": elapsed}), flush=True)
+    if args.backend == "numpy":
+        actual_device_kind = "host"
+    else:
+        actual_device_kind = backend["jax"].devices()[0].platform
+    print(
+        json.dumps(
+            {
+                "status": "done",
+                "call_elapsed_s": elapsed,
+                "actual_device_kind": actual_device_kind,
+            }
+        ),
+        flush=True,
+    )
 
 
 def trace_case(
@@ -265,7 +278,10 @@ def trace_case(
         "call_elapsed_s": payload["call_elapsed_s"],
         "process_elapsed_s": t_s[-1] if t_s else 0.0,
         "peak_rss_mb": max(rss_mb) if rss_mb else 0.0,
-        "device_kind": "gpu" if gpu and backend == "jax" else ("cpu" if backend == "jax" else "host"),
+        "device_kind": payload.get(
+            "actual_device_kind",
+            "gpu" if gpu and backend == "jax" else ("cpu" if backend == "jax" else "host"),
+        ),
         "samples": {
             "t_s": t_s,
             "rss_mb": rss_mb,
