@@ -9,6 +9,21 @@ from .grid import Grid, GridStack
 from .util import resolve_device
 
 
+class _AxisBundle:
+    """Minimal attribute-access wrapper for array-valued grid axes."""
+
+    __slots__ = ("_axes",)
+
+    def __init__(self, axes):
+        self._axes = axes
+
+    def __getattr__(self, name):
+        try:
+            return self._axes[name]
+        except KeyError as exc:
+            raise AttributeError(name) from exc
+
+
 class ExperimentDesigner:
     """Brute-force expected information gain calculation using JAX arrays."""
 
@@ -69,17 +84,388 @@ class ExperimentDesigner:
                 )
 
         self._initialized = False
+        self._compiled_kernels = {
+            "calculateEIG": {},
+            "calculateEIG_chunked": {},
+            "calculateMarginalEIG": {},
+            "calculateMarginalEIG_chunked": {},
+            "get_posterior": {},
+        }
         with jax.default_device(self.device):
             self.EIG = jnp.full(self.designs.shape, jnp.nan)
 
-    def _set_masked_values(self, target, mask, values):
+    def _grid_weights(self, grid):
         with jax.default_device(self.device):
-            mask_indices = jnp.nonzero(jnp.asarray(mask))
-            return target.at[mask_indices].set(jnp.ravel(jnp.asarray(values)))
+            if grid.constraint is None:
+                return jnp.ones(grid.shape)
+            return jnp.broadcast_to(jnp.asarray(grid.constraint_weights), grid.shape)
+
+    def _pad_subgrid_values(self, values, actual_shape, target_shape):
+        if tuple(actual_shape) == tuple(target_shape):
+            return values
+
+        ndim = len(self.features.shape) + len(actual_shape) + len(self.parameters.shape)
+        pad_width = [(0, 0)] * ndim
+        design_offset = len(self.features.shape)
+        for axis, (actual, target) in enumerate(zip(actual_shape, target_shape)):
+            pad_width[design_offset + axis] = (0, int(target) - int(actual))
+        return jnp.pad(values, pad_width)
+
+    def _broadcast_grid_axes(self, grid):
+        return {
+            name: jnp.broadcast_to(jnp.asarray(grid.axes[name]), grid.shape)
+            for name in grid.names
+        }
+
+    def _stacked_axis_bundle(self, grid, total_ndim, offset):
+        axes = {}
+        for name, values in self._broadcast_grid_axes(grid).items():
+            shape = [1] * total_ndim
+            shape[offset : offset + len(grid.shape)] = grid.shape
+            axes[name] = jnp.reshape(values, tuple(shape))
+        return _AxisBundle(axes)
+
+    def _flattened_design_axes(self):
+        return {
+            name: jnp.reshape(values, (-1,))
+            for name, values in self._broadcast_grid_axes(self.designs).items()
+        }
+
+    def _get_chunk_scan_setup(self):
+        key = int(self.design_subgrid)
+        cache = self._compiled_kernels.setdefault("chunk_scan_setup", {})
+        if key in cache:
+            return cache[key]
+
+        feature_ndim = len(self.features.shape)
+        param_ndim = len(self.parameters.shape)
+        total_ndim = feature_ndim + 1 + param_ndim
+        design_offset = feature_ndim
+        chunk_shape = (key,)
+        total_designs = int(math.prod(self.designs.shape))
+        num_chunks = math.ceil(total_designs / key)
+        padded_designs = num_chunks * key
+        expected_shape = self.features.shape + chunk_shape + self.parameters.shape
+        feature_axes = tuple(range(feature_ndim))
+        feature_weights = jnp.reshape(
+            self._grid_weights(self.features),
+            self.features.shape + (1,) * (1 + param_ndim),
+        )
+        params_bundle = self._stacked_axis_bundle(
+            self.parameters, total_ndim, feature_ndim + 1
+        )
+        features_bundle = self._stacked_axis_bundle(self.features, total_ndim, 0)
+        flat_design_axes = self._flattened_design_axes()
+        padded_design_axes = {
+            name: jnp.pad(values, (0, padded_designs - total_designs))
+            for name, values in flat_design_axes.items()
+        }
+
+        cache[key] = {
+            "chunk_shape": chunk_shape,
+            "total_ndim": total_ndim,
+            "design_offset": design_offset,
+            "total_designs": total_designs,
+            "num_chunks": num_chunks,
+            "expected_shape": expected_shape,
+            "feature_axes": feature_axes,
+            "feature_weights": feature_weights,
+            "params_bundle": params_bundle,
+            "features_bundle": features_bundle,
+            "padded_design_axes": padded_design_axes,
+        }
+        return cache[key]
+
+    def _get_marginal_grouping(self, nuisance_axes):
+        key = tuple(int(axis) for axis in nuisance_axes)
+        cache = self._compiled_kernels.setdefault("marginal_groups", {})
+        if key in cache:
+            return cache[key]
+
+        param_shape = tuple(int(v) for v in self.parameters.shape)
+        full_shape = tuple(int(v) for v in self.parameters.expanded_shape)
+        ndim = len(param_shape)
+        interest_axes = tuple(axis for axis in range(ndim) if axis not in nuisance_axes)
+        param_size = int(math.prod(param_shape))
+
+        if self.parameters.constraint is None:
+            reduced_indices = jnp.unravel_index(jnp.arange(param_size), param_shape)
+            full_indices = tuple(
+                jnp.asarray(idx, dtype=jnp.int32) for idx in reduced_indices
+            )
+        else:
+            weights = jnp.asarray(self.parameters.constraint_weights)
+            if not bool(jnp.allclose(weights, 1.0)):
+                raise NotImplementedError(
+                    "calculateMarginalEIG does not support weighted constrained parameter grids."
+                )
+
+            reduced_indices = jnp.unravel_index(jnp.arange(param_size), param_shape)
+            primary_axis = self.parameters.constraint_offsets[0]
+            full_indices = []
+            for axis in range(ndim):
+                if axis in self.parameters.constraint_offsets:
+                    full_idx = jnp.asarray(
+                        self.parameters.constraint_indices[axis],
+                        dtype=jnp.int32,
+                    )[reduced_indices[primary_axis]]
+                else:
+                    full_idx = jnp.asarray(reduced_indices[axis], dtype=jnp.int32)
+                full_indices.append(full_idx)
+            full_indices = tuple(full_indices)
+
+        if interest_axes:
+            interest_shape = tuple(full_shape[axis] for axis in interest_axes)
+            group_ids = jnp.ravel_multi_index(
+                tuple(full_indices[axis] for axis in interest_axes), interest_shape
+            ).astype(jnp.int32)
+            num_segments = int(math.prod(interest_shape))
+        else:
+            interest_shape = ()
+            group_ids = jnp.zeros((param_size,), dtype=jnp.int32)
+            num_segments = 1
+
+        cache[key] = (
+            tuple(int(axis) for axis in interest_axes),
+            group_ids,
+            num_segments,
+            interest_shape,
+        )
+        return cache[key]
+
+    def _make_eig_eval(self, subgrid_shape):
+        key = tuple(int(v) for v in subgrid_shape)
+        feature_shape = tuple(int(v) for v in self.features.shape)
+        param_shape = tuple(int(v) for v in self.parameters.shape)
+        feature_size = int(math.prod(feature_shape))
+        subgrid_size = int(math.prod(subgrid_shape))
+        param_weights = self._grid_weights(self.parameters)
+        feature_weights = jnp.reshape(self._grid_weights(self.features), (feature_size,))
+
+        def kernel(sub_likelihood, prior, h0):
+            flat = jnp.reshape(
+                sub_likelihood,
+                (feature_size, subgrid_size) + param_shape,
+            )
+            design_first = jnp.swapaxes(flat, 0, 1)
+
+            def one_feature(likelihood_row):
+                weighted = likelihood_row * prior
+                marginal = jnp.sum(weighted * param_weights)
+                posterior = jnp.where(marginal > 0, weighted / marginal, weighted)
+                log2post = jnp.where(posterior > 0, jnp.log2(posterior), 0.0)
+                ig = h0 + jnp.sum(posterior * log2post * param_weights)
+                ig = jnp.where(marginal > 0, ig, 0.0)
+                return marginal, ig
+
+            def one_design(feature_rows):
+                marginals, ig_values = jax.vmap(one_feature)(feature_rows)
+                eig = jnp.sum(feature_weights * marginals * ig_values)
+                return marginals, ig_values, eig
+
+            marginals, ig_values, eig_values = jax.vmap(one_design)(design_first)
+            marginal = jnp.swapaxes(marginals, 0, 1).reshape(feature_shape + key)
+            ig = jnp.swapaxes(ig_values, 0, 1).reshape(feature_shape + key)
+            eig = jnp.reshape(eig_values, key)
+            return marginal, ig, eig
+
+        return kernel
+
+    def _get_eig_kernel(self, subgrid_shape):
+        key = tuple(int(v) for v in subgrid_shape)
+        cache = self._compiled_kernels["calculateEIG"]
+        if key in cache:
+            return cache[key]
+
+        cache[key] = jax.jit(self._make_eig_eval(key))
+        return cache[key]
+
+    def _get_chunked_eig_kernel(self):
+        key = int(self.design_subgrid)
+        cache = self._compiled_kernels["calculateEIG_chunked"]
+        if key in cache:
+            return cache[key]
+
+        setup = self._get_chunk_scan_setup()
+        chunk_shape = setup["chunk_shape"]
+        total_ndim = setup["total_ndim"]
+        design_offset = setup["design_offset"]
+        total_designs = setup["total_designs"]
+        num_chunks = setup["num_chunks"]
+        expected_shape = setup["expected_shape"]
+        feature_axes = setup["feature_axes"]
+        feature_weights = setup["feature_weights"]
+        params_bundle = setup["params_bundle"]
+        features_bundle = setup["features_bundle"]
+        padded_design_axes = setup["padded_design_axes"]
+        eval_chunk = self._make_eig_eval(chunk_shape)
+
+        def kernel(prior, h0):
+            chunk_indices = jnp.arange(num_chunks, dtype=jnp.int32)
+
+            def one_chunk(_, chunk_idx):
+                start = chunk_idx * key
+                design_axes = {}
+                for name, values in padded_design_axes.items():
+                    chunk_values = jax.lax.dynamic_slice_in_dim(values, start, key)
+                    shape = [1] * total_ndim
+                    shape[design_offset] = key
+                    design_axes[name] = jnp.reshape(chunk_values, tuple(shape))
+                designs_bundle = _AxisBundle(design_axes)
+
+                likelihood = self.unnorm_lfunc(
+                    params_bundle,
+                    features_bundle,
+                    designs_bundle,
+                    **self.lfunc_args,
+                )
+                likelihood = jnp.asarray(likelihood)
+                if tuple(likelihood.shape) != expected_shape:
+                    likelihood = jnp.broadcast_to(likelihood, expected_shape)
+                likelihood_norm = jnp.sum(
+                    likelihood * feature_weights, axis=feature_axes, keepdims=True
+                )
+                likelihood = likelihood / likelihood_norm
+                _, _, eig = eval_chunk(likelihood, prior, h0)
+                return None, eig
+
+            _, eig_chunks = jax.lax.scan(one_chunk, None, chunk_indices)
+            return jnp.reshape(eig_chunks, (-1,))[:total_designs]
+
+        cache[key] = jax.jit(kernel)
+        return cache[key]
+
+    def _get_chunked_marginal_eig_kernel(self, nuisance_axes):
+        key = (int(self.design_subgrid), tuple(int(v) for v in nuisance_axes))
+        cache = self._compiled_kernels["calculateMarginalEIG_chunked"]
+        if key in cache:
+            return cache[key]
+
+        setup = self._get_chunk_scan_setup()
+        chunk_shape = setup["chunk_shape"]
+        total_ndim = setup["total_ndim"]
+        design_offset = setup["design_offset"]
+        total_designs = setup["total_designs"]
+        num_chunks = setup["num_chunks"]
+        expected_shape = setup["expected_shape"]
+        feature_axes = setup["feature_axes"]
+        feature_weights = setup["feature_weights"]
+        params_bundle = setup["params_bundle"]
+        features_bundle = setup["features_bundle"]
+        padded_design_axes = setup["padded_design_axes"]
+        eval_chunk = self._get_marginal_eig_kernel(chunk_shape, nuisance_axes)
+
+        def kernel(prior, h0):
+            chunk_indices = jnp.arange(num_chunks, dtype=jnp.int32)
+
+            def one_chunk(_, chunk_idx):
+                start = chunk_idx * key[0]
+                design_axes = {}
+                for name, values in padded_design_axes.items():
+                    chunk_values = jax.lax.dynamic_slice_in_dim(values, start, key[0])
+                    shape = [1] * total_ndim
+                    shape[design_offset] = key[0]
+                    design_axes[name] = jnp.reshape(chunk_values, tuple(shape))
+                designs_bundle = _AxisBundle(design_axes)
+
+                likelihood = self.unnorm_lfunc(
+                    params_bundle,
+                    features_bundle,
+                    designs_bundle,
+                    **self.lfunc_args,
+                )
+                likelihood = jnp.asarray(likelihood)
+                if tuple(likelihood.shape) != expected_shape:
+                    likelihood = jnp.broadcast_to(likelihood, expected_shape)
+                likelihood_norm = jnp.sum(
+                    likelihood * feature_weights, axis=feature_axes, keepdims=True
+                )
+                likelihood = likelihood / likelihood_norm
+                eig = eval_chunk(likelihood, prior, h0)
+                return None, eig
+
+            _, eig_chunks = jax.lax.scan(one_chunk, None, chunk_indices)
+            return jnp.reshape(eig_chunks, (-1,))[:total_designs]
+
+        cache[key] = jax.jit(kernel)
+        return cache[key]
+
+    def _get_marginal_eig_kernel(self, subgrid_shape, nuisance_axes):
+        interest_axes, group_ids, num_segments, interest_shape = self._get_marginal_grouping(
+            nuisance_axes
+        )
+        key = (
+            tuple(int(v) for v in subgrid_shape),
+            tuple(int(v) for v in nuisance_axes),
+        )
+        cache = self._compiled_kernels["calculateMarginalEIG"]
+        if key in cache:
+            return cache[key]
+
+        feature_shape = tuple(int(v) for v in self.features.shape)
+        param_shape = tuple(int(v) for v in self.parameters.shape)
+        feature_size = int(math.prod(feature_shape))
+        subgrid_size = int(math.prod(subgrid_shape))
+        param_size = int(math.prod(param_shape))
+        param_weights = jnp.reshape(self._grid_weights(self.parameters), (param_size,))
+        feature_weights = jnp.reshape(self._grid_weights(self.features), (feature_size,))
+
+        def kernel(sub_likelihood, prior, h0):
+            flat = jnp.reshape(
+                sub_likelihood,
+                (feature_size, subgrid_size) + param_shape,
+            )
+            design_first = jnp.swapaxes(flat, 0, 1)
+
+            def one_feature(likelihood_row):
+                weighted = likelihood_row * prior
+                marginal = jnp.sum(weighted * jnp.reshape(param_weights, param_shape))
+                posterior = jnp.where(marginal > 0, weighted / marginal, prior)
+                post = jax.ops.segment_sum(
+                    jnp.reshape(posterior, (param_size,)) * param_weights,
+                    group_ids,
+                    num_segments=num_segments,
+                ).reshape(interest_shape)
+                log2post = jnp.where(post > 0, jnp.log2(post), 0.0)
+                ig = h0 + jnp.sum(post * log2post)
+                return marginal, ig
+
+            def one_design(feature_rows):
+                marginals, ig_values = jax.vmap(one_feature)(feature_rows)
+                eig = jnp.sum(feature_weights * marginals * ig_values)
+                return eig
+
+            eig_values = jax.vmap(one_design)(design_first)
+            eig = jnp.reshape(eig_values, key[0])
+            return eig
+
+        cache[key] = jax.jit(kernel)
+        return cache[key]
+
+    def _get_posterior_kernel(self, cond_shapes):
+        key = tuple(tuple(int(v) for v in shape) for shape in cond_shapes)
+        cache = self._compiled_kernels["get_posterior"]
+        if key in cache:
+            return cache[key]
+
+        param_ndim = len(self.parameters.shape)
+        sum_axes = tuple(range(-param_ndim, 0))
+        param_weights = self._grid_weights(self.parameters)
+
+        def kernel(likelihood, prior):
+            weighted = likelihood * prior
+            post_norm = jnp.sum(weighted * param_weights, axis=sum_axes, keepdims=True)
+            post = jnp.where(post_norm > 0, weighted / post_norm, weighted)
+            post = jnp.where(post_norm == 0, prior, post)
+            return post
+
+        cache[key] = jax.jit(kernel)
+        return cache[key]
 
     def calculateEIG(self, prior, debug=False):
         with jax.default_device(self.device):
             self.prior = jnp.asarray(prior)
+            self.EIG = jnp.full_like(self.EIG, jnp.nan)
         prior_norm = self.parameters.sum(self.prior)
         if not bool(jnp.allclose(prior_norm, 1.0)):
             raise ValueError("Prior probabilities must sum to 1")
@@ -87,82 +473,67 @@ class ExperimentDesigner:
         # Calculate prior entropy in bits (careful with x log x = 0 for x=0).
         log2prior = jnp.where(self.prior > 0, jnp.log2(self.prior), 0)
         self.H0 = float(-self.parameters.sum(self.prior * log2prior))
+        h0 = jnp.asarray(self.H0, dtype=self.prior.dtype)
+        total_designs = int(math.prod(self.designs.shape))
 
-        for i, (s, mask) in enumerate(self.designs.subgrid(self.design_subgrid)):
+        if self.num_subgrids > 1 and not debug:
+            first_subgrid, _ = next(self.designs.subgrid(self.design_subgrid))
+            self.subgrid_shape = first_subgrid.shape
+            with GridStack(self.features, first_subgrid, self.parameters):
+                first_likelihood = self.likelihood_func(first_subgrid)
+                first_kernel = self._get_eig_kernel(self.subgrid_shape)
+                marginal, ig, _ = first_kernel(first_likelihood, self.prior, h0)
+                self.marginal = marginal
+                self.IG = ig
+
+            eig_flat = self._get_chunked_eig_kernel()(self.prior, h0)
+            self.EIG = jnp.reshape(eig_flat, self.designs.shape)
+            self._initialized = True
+            return self.designs.getmax(self.EIG)
+
+        eig_flat = jnp.full((total_designs,), jnp.nan, dtype=self.prior.dtype)
+
+        for i, (s, _) in enumerate(self.designs.subgrid(self.design_subgrid)):
+            chunk_size = int(math.prod(s.shape))
             if i == 0:
                 # Store first subgrid likelihood shape for describe().
                 self.subgrid_shape = s.shape
 
             with GridStack(self.features, s, self.parameters):
-                sub_likelihood = self.likelihood_func(s)  # use of memory
-                assert bool(jnp.allclose(self.features.sum(sub_likelihood), 1.0))
-
-                # Tabulate the marginal probability P(y|xi) by integrating P(y|theta,xi) P(theta) over theta.
-                # No explicit normalization is required since P(y|theta,xi) and P(theta) are already normalized.
-                # Check that the likelihood is normalized over features
-                self._buffer = sub_likelihood * self.prior
-                marginal = self.parameters.sum(self._buffer)
-                if i == 0:
-                    # Store first subgrid marginal for describe().
-                    self.marginal = marginal
-
+                sub_likelihood = self.likelihood_func(s)
                 if debug:
                     assert bool(
-                        jnp.allclose(
-                            self.parameters.sum(
-                                self.likelihood_func(s) * self.prior
-                            ),
-                            marginal,
-                        )
+                        jnp.allclose(self.features.sum(sub_likelihood), 1.0)
+                    ), "likelihood normalization failed"
+
+                kernel = self._get_eig_kernel(self.subgrid_shape)
+                sub_likelihood = self._pad_subgrid_values(
+                    sub_likelihood, s.shape, self.subgrid_shape
+                )
+                marginal, ig, eig = kernel(sub_likelihood, self.prior, h0)
+                if i == 0:
+                    # Store first subgrid arrays for describe().
+                    self.marginal = marginal
+                    self.IG = ig
+
+                if debug:
+                    marginal_ref = self.parameters.sum(sub_likelihood * self.prior)
+                    assert bool(
+                        jnp.allclose(marginal_ref, marginal)
                     ), "marginal check failed"
 
-                # Tabulate the posterior P(theta|y,xi) by normalizing P(y|theta,xi) P(theta) over parameters.
-                # Use the prior for any (design, feature) points where the likelihood x prior is zero
-                # so the corresponding information gain is zero.
-                post_norm = self.parameters.sum(self._buffer, keepdims=True)
-                self._buffer = jnp.where(
-                    post_norm > 0, self._buffer / post_norm, self._buffer
-                )
-
-                if debug:
-                    # This will fail if likelihood*prior is zero for any
-                    # (design, feature) point.
-                    posterior = self.parameters.normalize(
-                        self.likelihood_func(s) * self.prior
-                    )
-                    assert bool(
-                        jnp.allclose(posterior, self._buffer)
-                    ), "posterior check failed"
-
-                # Tabulate information gain in bits IG = post * log2(post) + H0.
-                # Do calculations in stages to avoid large temporaries.
-                log2post = jnp.where(self._buffer > 0, jnp.log2(self._buffer), 0)
-                self._buffer = log2post * sub_likelihood * self.prior
-                self._buffer = jnp.where(
-                    post_norm > 0, self._buffer / post_norm, self._buffer
-                )
-
-                IG = self.H0 + self.parameters.sum(self._buffer)
-                IG = jnp.where(jnp.reshape(post_norm, IG.shape) == 0, 0, IG)
-                if i == 0:
-                    self.IG = IG
-
-                if debug:
+                    posterior = self.parameters.normalize(sub_likelihood * self.prior)
                     log2posterior = jnp.where(posterior > 0, jnp.log2(posterior), 0)
-                    assert bool(
-                        jnp.allclose(
-                            self.H0
-                            + self.parameters.sum(posterior * log2posterior),
-                            IG,
-                        )
-                    ), "IG check failed"
+                    ig_ref = self.H0 + self.parameters.sum(posterior * log2posterior)
+                    ig_ref = jnp.where(marginal_ref > 0, ig_ref, 0)
+                    assert bool(jnp.allclose(ig_ref, ig)), "IG check failed"
 
-                eig = self.features.sum(marginal * IG)
-                self.EIG = self._set_masked_values(self.EIG, mask, eig)
+                start = i * self.design_subgrid
+                stop = start + chunk_size
+                eig_flat = eig_flat.at[start:stop].set(jnp.ravel(eig)[:chunk_size])
 
+        self.EIG = jnp.reshape(eig_flat, self.designs.shape)
         self._initialized = True
-        if hasattr(self, "_buffer"):
-            del self._buffer
         return self.designs.getmax(self.EIG)
 
     def likelihood_func(self, s):
@@ -171,54 +542,63 @@ class ExperimentDesigner:
         )
         with jax.default_device(self.device):
             likelihood = jnp.asarray(likelihood)
-        return self.features.normalize(likelihood)
+        likelihood = self.features.normalize(likelihood)
+        expected_shape = self.features.shape + s.shape + self.parameters.shape
+        if tuple(likelihood.shape) != expected_shape:
+            likelihood = jnp.broadcast_to(likelihood, expected_shape)
+        return likelihood
 
     def calculateMarginalEIG(self, *nuisance_params):
         if not self._initialized:
             raise RuntimeError("Must call calculateEIG before calculateMarginalEIG")
 
-        # Determine parameters of interest (complement of nuisance params).
-        interest_params = tuple(
-            n for n in self.parameters.names if n not in nuisance_params
-        )
-        # Calculate marginal prior and its entropy.
-        prior = self.parameters.sum(
-            self.prior, axis_names=nuisance_params, keepdims=True
-        )
-        log2prior = jnp.where(prior > 0, jnp.log2(prior), 0)
-        H0 = -self.parameters.sum(prior * log2prior, axis_names=interest_params)
+        invalid_names = [
+            name for name in nuisance_params if name not in self.parameters.names
+        ]
+        if invalid_names:
+            raise ValueError(f"Invalid nuisance parameters: {invalid_names}")
 
-        # Calculate marginal posterior and information gain.
+        nuisance_axes = tuple(
+            idx
+            for idx, name in enumerate(self.parameters.names)
+            if name in nuisance_params
+        )
+        _, group_ids, num_segments, interest_shape = self._get_marginal_grouping(
+            nuisance_axes
+        )
+        param_size = int(math.prod(self.parameters.shape))
+        param_weights = jnp.reshape(self._grid_weights(self.parameters), (param_size,))
+        prior_interest = jax.ops.segment_sum(
+            jnp.reshape(self.prior, (param_size,)) * param_weights,
+            group_ids,
+            num_segments=num_segments,
+        ).reshape(interest_shape)
+        log2prior = jnp.where(prior_interest > 0, jnp.log2(prior_interest), 0)
+        h0 = -jnp.sum(prior_interest * log2prior)
+
+        if self.num_subgrids > 1:
+            eig_flat = self._get_chunked_marginal_eig_kernel(nuisance_axes)(
+                self.prior, h0
+            )
+            return jnp.reshape(eig_flat, self.designs.shape)
+
         with jax.default_device(self.device):
-            EIG = jnp.full_like(self.EIG, jnp.nan)
-        for (s, mask) in self.designs.subgrid(self.design_subgrid):
+            eig_full = jnp.full_like(self.EIG, jnp.nan)
+        eig_flat = jnp.full((int(math.prod(self.designs.shape)),), jnp.nan, dtype=self.prior.dtype)
+        for i, (s, _) in enumerate(self.designs.subgrid(self.design_subgrid)):
+            chunk_size = int(math.prod(s.shape))
             with GridStack(self.features, s, self.parameters):
                 sub_likelihood = self.likelihood_func(s)
-                self._buffer = sub_likelihood * self.prior
-                marginal = self.parameters.sum(self._buffer)
-                post_norm = self.parameters.sum(self._buffer, keepdims=True)
-
-                self._buffer = jnp.where(
-                    post_norm > 0, self._buffer / post_norm, self._buffer
+                kernel = self._get_marginal_eig_kernel(self.subgrid_shape, nuisance_axes)
+                sub_likelihood = self._pad_subgrid_values(
+                    sub_likelihood, s.shape, self.subgrid_shape
                 )
-                self._buffer = jnp.where(post_norm == 0, self.prior, self._buffer)
-
-                post = self.parameters.sum(
-                    self._buffer, axis_names=nuisance_params, keepdims=True
-                )
-                # Calculate IG for all possible designs and measurements.
-                log2post = jnp.where(post > 0, jnp.log2(post), 0)
-                IG = H0 + self.parameters.sum(
-                    post * log2post, axis_names=interest_params
-                )
-
-                # Tabulate expected information gain in bits.
-                eig = self.features.sum(marginal * IG)
-                EIG = self._set_masked_values(EIG, mask, eig)
-
-        if hasattr(self, "_buffer"):
-            del self._buffer
-        return EIG
+                eig = kernel(sub_likelihood, self.prior, h0)
+                start = i * self.design_subgrid
+                stop = start + chunk_size
+                eig_flat = eig_flat.at[start:stop].set(jnp.ravel(eig)[:chunk_size])
+        eig_full = jnp.reshape(eig_flat, self.designs.shape)
+        return eig_full
 
     def describe(self):
         if not self._initialized:
@@ -292,9 +672,11 @@ class ExperimentDesigner:
 
         cond_designs = Grid(device=self.device, **designs)
         cond_features = Grid(device=self.device, **features)
+        cond_shapes = (cond_features.shape, cond_designs.shape)
+        kernel = self._get_posterior_kernel(cond_shapes)
 
         with jax.default_device(self.device):
-            self._buffer = jnp.asarray(
+            likelihood = jnp.asarray(
                 self.unnorm_lfunc(
                     self.parameters,
                     cond_features,
@@ -302,13 +684,8 @@ class ExperimentDesigner:
                     **self.lfunc_args,
                 )
             )
-            self._buffer = self._buffer * self.prior
-            post_norm = self.parameters.sum(self._buffer, keepdims=True)
-            self._buffer = jnp.where(
-                post_norm > 0, self._buffer / post_norm, self._buffer
-            )
-            self._buffer = jnp.where(post_norm == 0, self.prior, self._buffer)
-        return self._buffer
+            posterior = kernel(likelihood, self.prior)
+        return posterior
 
     def update(self, **design_and_features):
         post = self.get_posterior(**design_and_features)
