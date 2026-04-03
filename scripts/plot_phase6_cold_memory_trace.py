@@ -12,14 +12,12 @@ os.environ.setdefault("MPLCONFIGDIR", str(Path("/tmp/matplotlib-codex")))
 
 import matplotlib.pyplot as plt
 
-COLOR_BY_CURVE_BACKEND = {
-    ("1d", "numpy"): "#9ecae1",
-    ("1d", "jax_cpu"): "tab:blue",
-    ("1d", "jax_gpu"): "tab:blue",
-    ("3d", "numpy"): "#a1d99b",
-    ("3d", "jax_cpu"): "tab:green",
-    ("3d", "jax_gpu"): "tab:green",
-}
+DEVICE_COLOR_FAMILIES = [
+    {"numpy": "#9ecae1", "jax": "tab:blue"},
+    {"numpy": "#a1d99b", "jax": "tab:green"},
+    {"numpy": "#fdd0a2", "jax": "tab:orange"},
+    {"numpy": "#dadaeb", "jax": "tab:purple"},
+]
 
 
 def parse_args():
@@ -55,6 +53,10 @@ def main():
         path: linestyle_cycle[idx % len(linestyle_cycle)]
         for idx, path in enumerate(args.input_jsons)
     }
+    color_family_by_file = {
+        path: DEVICE_COLOR_FAMILIES[idx % len(DEVICE_COLOR_FAMILIES)]
+        for idx, path in enumerate(args.input_jsons)
+    }
     traces_by_file = {
         path: json.loads(path.read_text())
         for path in args.input_jsons
@@ -79,16 +81,19 @@ def main():
                 backend_key = "jax_gpu"
             elif backend_key == "jax":
                 backend_key = "jax_cpu"
-            color = COLOR_BY_CURVE_BACKEND.get((curve_family, backend_key), "tab:gray")
+            family = color_family_by_file[path]
+            if backend_key == "numpy":
+                color = family["numpy"]
+            elif backend_key in ("jax_cpu", "jax_gpu"):
+                color = family["jax"]
+            else:
+                color = "tab:gray"
             backend_label = {
-                ("1d", "numpy"): "1D sine wave: NumPy",
-                ("1d", "jax_cpu"): "1D sine wave: JAX",
-                ("1d", "jax_gpu"): "1D sine wave: JAX",
-                ("3d", "numpy"): "3D sine wave: NumPy",
-                ("3d", "jax_cpu"): "3D sine wave: JAX",
-                ("3d", "jax_gpu"): "3D sine wave: JAX",
-            }.get((curve_family, backend_key), trace["label"])
-            backend_handles[(curve_family, backend_key)] = (color, backend_label)
+                "numpy": "NumPy",
+                "jax_cpu": "JAX",
+                "jax_gpu": "JAX",
+            }.get(backend_key, trace["label"])
+            backend_handles[(path, backend_key)] = (color, backend_label)
             expected = trace.get("expected_schedule")
             sample_key = "uss_mb" if args.metric == "uss" and "uss_mb" in trace["samples"] else "rss_mb"
             metric_name = "USS" if sample_key == "uss_mb" else "RSS"
@@ -173,15 +178,23 @@ def main():
             loc="upper left",
         )
     else:
-        backend_legend = [
-            Line2D([0], [0], color=color, linewidth=2.0, label=label)
-            for _, (color, label) in sorted(backend_handles.items())
-        ]
+        backend_legend = []
+        seen_backend_labels = set()
+        for path in args.input_jsons:
+            family = color_family_by_file[path]
+            for key, color in (("numpy", family["numpy"]), ("jax", family["jax"])):
+                label = f"{path.stem}: {'NumPy' if key == 'numpy' else 'JAX'}"
+                if label in seen_backend_labels:
+                    continue
+                seen_backend_labels.add(label)
+                backend_legend.append(
+                    Line2D([0], [0], color=color, linewidth=2.0, label=label)
+                )
         device_legend = [
             Line2D([0], [0], color="0.2", linestyle=linestyle_by_file[path], linewidth=2.0, label=path.stem)
             for path in args.input_jsons
         ]
-        legend1 = ax.legend(handles=backend_legend, frameon=False, loc="upper left", title="Backend")
+        legend1 = ax.legend(handles=backend_legend, frameon=False, loc="upper left", title="Series")
         ax.add_artist(legend1)
         if len(device_legend) > 1:
             ax.legend(handles=device_legend, frameon=False, loc="upper right", title="Device")
