@@ -48,9 +48,8 @@ def parse_args():
 
 def main():
     args = parse_args()
-    linestyle_cycle = ["-", "--", "-.", ":"]
     linestyle_by_file = {
-        path: linestyle_cycle[idx % len(linestyle_cycle)]
+        path: "-"
         for idx, path in enumerate(args.input_jsons)
     }
     color_family_by_file = {
@@ -196,8 +195,6 @@ def main():
         ]
         legend1 = ax.legend(handles=backend_legend, frameon=False, loc="upper left", title="Series")
         ax.add_artist(legend1)
-        if len(device_legend) > 1:
-            ax.legend(handles=device_legend, frameon=False, loc="upper right", title="Device")
 
     fig.tight_layout()
     args.output.parent.mkdir(parents=True, exist_ok=True)
