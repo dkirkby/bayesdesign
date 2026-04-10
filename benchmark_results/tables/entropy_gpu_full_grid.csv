@@ -1,0 +1,12 @@
+table_name,measure,curve_family,series_key,series_label,x_label,x_value,backend_key,backend_label,device_kind,total_elapsed_s,call_elapsed_s,peak_rss_mb,design_points_1d,subgrid_mem_mb
+entropy_gpu,full_grid,1d,1d_full_grid,1D sine wave,Frequency grid points,50,jax_gpu,JAX GPU,gpu,5.5797766931355,3.688634689897299,1646.46875,51,50.0
+entropy_gpu,full_grid,1d,1d_full_grid,1D sine wave,Frequency grid points,500,jax_gpu,JAX GPU,gpu,5.534710392355919,3.6387334801256657,1717.6015625,51,50.0
+entropy_gpu,full_grid,1d,1d_full_grid,1D sine wave,Frequency grid points,1500,jax_gpu,JAX GPU,gpu,5.798591755330563,3.874200664460659,1781.7890625,51,50.0
+entropy_gpu,full_grid,1d,1d_full_grid,1D sine wave,Frequency grid points,5000,jax_gpu,JAX GPU,gpu,6.602439031004906,4.596795130521059,2260.35546875,51,50.0
+entropy_gpu,full_grid,1d,1d_full_grid,1D sine wave,Frequency grid points,10000,jax_gpu,JAX GPU,gpu,7.491033550351858,5.50502934679389,2925.12890625,51,50.0
+entropy_gpu,full_grid,1d,1d_full_grid,1D sine wave,Frequency grid points,20000,jax_gpu,JAX GPU,gpu,9.639310352504253,7.572869431227446,4258.1640625,51,50.0
+entropy_gpu,full_grid,3d,3d_full_grid,3D sine wave,Points per parameter axis,5,jax_gpu,JAX GPU,gpu,5.41600263863802,3.3080108761787415,1651.515625,51,50.0
+entropy_gpu,full_grid,3d,3d_full_grid,3D sine wave,Points per parameter axis,10,jax_gpu,JAX GPU,gpu,5.561932750046253,3.40338484197855,1685.375,51,50.0
+entropy_gpu,full_grid,3d,3d_full_grid,3D sine wave,Points per parameter axis,20,jax_gpu,JAX GPU,gpu,5.998556576669216,3.810725498944521,1889.828125,51,50.0
+entropy_gpu,full_grid,3d,3d_full_grid,3D sine wave,Points per parameter axis,30,jax_gpu,JAX GPU,gpu,7.131240695714951,4.85379546508193,2675.48046875,51,50.0
+entropy_gpu,full_grid,3d,3d_full_grid,3D sine wave,Points per parameter axis,50,jax_gpu,JAX GPU,gpu,10.775415282696486,8.628133580088615,4101.68359375,51,50.0
