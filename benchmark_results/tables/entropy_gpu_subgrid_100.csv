@@ -1,0 +1,12 @@
+table_name,measure,curve_family,series_key,series_label,x_label,x_value,backend_key,backend_label,device_kind,total_elapsed_s,call_elapsed_s,peak_rss_mb,design_points_1d,subgrid_mem_mb
+entropy_gpu,subgrid_100,1d,1d_subgrid_mem_100,1D sine wave (subgrid 100 MiB),Frequency grid points,50,jax_gpu,JAX GPU,gpu,5.4769760854542255,3.5963946655392647,1647.671875,51,100.0
+entropy_gpu,subgrid_100,1d,1d_subgrid_mem_100,1D sine wave (subgrid 100 MiB),Frequency grid points,500,jax_gpu,JAX GPU,gpu,5.584552325308323,3.640207525342703,1721.87890625,51,100.0
+entropy_gpu,subgrid_100,1d,1d_subgrid_mem_100,1D sine wave (subgrid 100 MiB),Frequency grid points,1500,jax_gpu,JAX GPU,gpu,8.348826061934233,6.345378078520298,1835.328125,51,100.0
+entropy_gpu,subgrid_100,1d,1d_subgrid_mem_100,1D sine wave (subgrid 100 MiB),Frequency grid points,5000,jax_gpu,JAX GPU,gpu,9.019770048558712,7.038199961185455,1880.5546875,51,100.0
+entropy_gpu,subgrid_100,1d,1d_subgrid_mem_100,1D sine wave (subgrid 100 MiB),Frequency grid points,10000,jax_gpu,JAX GPU,gpu,9.944534908980131,7.950534414499998,1875.7265625,51,100.0
+entropy_gpu,subgrid_100,1d,1d_subgrid_mem_100,1D sine wave (subgrid 100 MiB),Frequency grid points,20000,jax_gpu,JAX GPU,gpu,10.119053613394499,8.190092913806438,1817.25390625,51,100.0
+entropy_gpu,subgrid_100,3d,3d_subgrid_mem_100,3D sine wave (subgrid 100 MiB),Points per parameter axis,5,jax_gpu,JAX GPU,gpu,5.429657686501741,3.329601388424635,1650.015625,51,100.0
+entropy_gpu,subgrid_100,3d,3d_subgrid_mem_100,3D sine wave (subgrid 100 MiB),Points per parameter axis,10,jax_gpu,JAX GPU,gpu,5.556463312357664,3.395209651440382,1687.84765625,51,100.0
+entropy_gpu,subgrid_100,3d,3d_subgrid_mem_100,3D sine wave (subgrid 100 MiB),Points per parameter axis,20,jax_gpu,JAX GPU,gpu,8.482355937361717,6.240735150873661,1893.84765625,51,100.0
+entropy_gpu,subgrid_100,3d,3d_subgrid_mem_100,3D sine wave (subgrid 100 MiB),Points per parameter axis,30,jax_gpu,JAX GPU,gpu,10.062744248658419,7.783161889761686,1898.078125,51,100.0
+entropy_gpu,subgrid_100,3d,3d_subgrid_mem_100,3D sine wave (subgrid 100 MiB),Points per parameter axis,50,jax_gpu,JAX GPU,gpu,13.184221338480711,10.969104293733835,1824.82421875,51,100.0

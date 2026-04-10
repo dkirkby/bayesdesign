@@ -1,0 +1,23 @@
+table_name,measure,curve_family,series_key,series_label,x_label,x_value,backend_key,backend_label,device_kind,total_elapsed_s,call_elapsed_s,peak_rss_mb,design_points_1d,subgrid_mem_mb
+entropy,full_grid,1d,1d_full_grid,1D sine wave,Frequency grid points,50,numpy,NumPy,host,0.1476661004126072,0.013707015663385391,37.0703125,51,50.0
+entropy,full_grid,1d,1d_full_grid,1D sine wave,Frequency grid points,50,jax_cpu,JAX CPU,cpu,5.950821306556463,3.5299604199826717,1645.98828125,51,50.0
+entropy,full_grid,1d,1d_full_grid,1D sine wave,Frequency grid points,500,numpy,NumPy,host,0.2235751375555992,0.0853591151535511,129.38671875,51,50.0
+entropy,full_grid,1d,1d_full_grid,1D sine wave,Frequency grid points,500,jax_cpu,JAX CPU,cpu,5.38131795451045,3.509933091700077,1719.54296875,51,50.0
+entropy,full_grid,1d,1d_full_grid,1D sine wave,Frequency grid points,1500,numpy,NumPy,host,0.376943726092577,0.24332290887832642,322.7265625,51,50.0
+entropy,full_grid,1d,1d_full_grid,1D sine wave,Frequency grid points,1500,jax_cpu,JAX CPU,cpu,5.646721303462982,3.76526340469718,1775.94140625,51,50.0
+entropy,full_grid,1d,1d_full_grid,1D sine wave,Frequency grid points,5000,numpy,NumPy,host,0.915294710546732,0.7671365477144718,1004.8515625,51,50.0
+entropy,full_grid,1d,1d_full_grid,1D sine wave,Frequency grid points,5000,jax_cpu,JAX CPU,cpu,6.438924338668585,4.439273197203875,2260.06640625,51,50.0
+entropy,full_grid,1d,1d_full_grid,1D sine wave,Frequency grid points,10000,numpy,NumPy,host,1.7771033085882664,1.6063441932201385,1988.0859375,51,50.0
+entropy,full_grid,1d,1d_full_grid,1D sine wave,Frequency grid points,10000,jax_cpu,JAX CPU,cpu,7.375625483691692,5.415460515767336,2921.0859375,51,50.0
+entropy,full_grid,1d,1d_full_grid,1D sine wave,Frequency grid points,20000,numpy,NumPy,host,3.1812199726700783,3.0424931161105633,3944.1796875,51,50.0
+entropy,full_grid,1d,1d_full_grid,1D sine wave,Frequency grid points,20000,jax_cpu,JAX CPU,cpu,9.551290892064571,7.502843514084816,4252.5390625,51,50.0
+entropy,full_grid,3d,3d_full_grid,3D sine wave,Points per parameter axis,5,numpy,NumPy,host,0.11795195937156677,0.011586304754018784,35.08203125,51,50.0
+entropy,full_grid,3d,3d_full_grid,3D sine wave,Points per parameter axis,5,jax_cpu,JAX CPU,cpu,5.427387204021215,3.3141323402523994,1648.01953125,51,50.0
+entropy,full_grid,3d,3d_full_grid,3D sine wave,Points per parameter axis,10,numpy,NumPy,host,0.18328497558832169,0.042450521141290665,79.24609375,51,50.0
+entropy,full_grid,3d,3d_full_grid,3D sine wave,Points per parameter axis,10,jax_cpu,JAX CPU,cpu,5.566858176141977,3.447213388979435,1687.07421875,51,50.0
+entropy,full_grid,3d,3d_full_grid,3D sine wave,Points per parameter axis,20,numpy,NumPy,host,0.45204100385308266,0.3181478790938854,423.02734375,51,50.0
+entropy,full_grid,3d,3d_full_grid,3D sine wave,Points per parameter axis,20,jax_cpu,JAX CPU,cpu,5.852978155016899,3.6840904019773006,1891.51171875,51,50.0
+entropy,full_grid,3d,3d_full_grid,3D sine wave,Points per parameter axis,30,numpy,NumPy,host,1.2174920067191124,1.077312208712101,1355.7265625,51,50.0
+entropy,full_grid,3d,3d_full_grid,3D sine wave,Points per parameter axis,30,jax_cpu,JAX CPU,cpu,7.020230777561665,4.726294357329607,2679.0234375,51,50.0
+entropy,full_grid,3d,3d_full_grid,3D sine wave,Points per parameter axis,50,numpy,NumPy,host,5.120578289031982,4.99056101962924,6164.18359375,51,50.0
+entropy,full_grid,3d,3d_full_grid,3D sine wave,Points per parameter axis,50,jax_cpu,JAX CPU,cpu,10.714849766343832,8.559023629873991,4099.7421875,51,50.0

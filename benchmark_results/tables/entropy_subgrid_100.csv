@@ -1,0 +1,23 @@
+table_name,measure,curve_family,series_key,series_label,x_label,x_value,backend_key,backend_label,device_kind,total_elapsed_s,call_elapsed_s,peak_rss_mb,design_points_1d,subgrid_mem_mb
+entropy,subgrid_100,1d,1d_subgrid_mem_100,1D sine wave (subgrid 100 MiB),Frequency grid points,50,numpy,NumPy,host,0.15415702760219574,0.01366865262389183,37.75,51,100.0
+entropy,subgrid_100,1d,1d_subgrid_mem_100,1D sine wave (subgrid 100 MiB),Frequency grid points,50,jax_cpu,JAX CPU,cpu,5.521977640688419,3.618538472801447,1649.359375,51,100.0
+entropy,subgrid_100,1d,1d_subgrid_mem_100,1D sine wave (subgrid 100 MiB),Frequency grid points,500,numpy,NumPy,host,0.22885481268167496,0.08725972846150398,129.96875,51,100.0
+entropy,subgrid_100,1d,1d_subgrid_mem_100,1D sine wave (subgrid 100 MiB),Frequency grid points,500,jax_cpu,JAX CPU,cpu,5.3578756377100945,3.4942447654902935,1716.94140625,51,100.0
+entropy,subgrid_100,1d,1d_subgrid_mem_100,1D sine wave (subgrid 100 MiB),Frequency grid points,1500,numpy,NumPy,host,0.38701142743229866,0.24581850692629814,278.171875,51,100.0
+entropy,subgrid_100,1d,1d_subgrid_mem_100,1D sine wave (subgrid 100 MiB),Frequency grid points,1500,jax_cpu,JAX CPU,cpu,8.142765954136848,6.119292564690113,1829.66015625,51,100.0
+entropy,subgrid_100,1d,1d_subgrid_mem_100,1D sine wave (subgrid 100 MiB),Frequency grid points,5000,numpy,NumPy,host,0.9613461196422577,0.7937552258372307,287.12890625,51,100.0
+entropy,subgrid_100,1d,1d_subgrid_mem_100,1D sine wave (subgrid 100 MiB),Frequency grid points,5000,jax_cpu,JAX CPU,cpu,8.817263167351484,6.898036241531372,1875.78125,51,100.0
+entropy,subgrid_100,1d,1d_subgrid_mem_100,1D sine wave (subgrid 100 MiB),Frequency grid points,10000,numpy,NumPy,host,1.6952087432146072,1.5578249730169773,267.1328125,51,100.0
+entropy,subgrid_100,1d,1d_subgrid_mem_100,1D sine wave (subgrid 100 MiB),Frequency grid points,10000,jax_cpu,JAX CPU,cpu,9.838041096925735,7.889875080436468,1865.82421875,51,100.0
+entropy,subgrid_100,1d,1d_subgrid_mem_100,1D sine wave (subgrid 100 MiB),Frequency grid points,20000,numpy,NumPy,host,3.2169987224042416,3.080640099942684,267.8671875,51,100.0
+entropy,subgrid_100,1d,1d_subgrid_mem_100,1D sine wave (subgrid 100 MiB),Frequency grid points,20000,jax_cpu,JAX CPU,cpu,9.684460278600454,7.681211210787296,1816.07421875,51,100.0
+entropy,subgrid_100,3d,3d_subgrid_mem_100,3D sine wave (subgrid 100 MiB),Points per parameter axis,5,numpy,NumPy,host,0.11764682456851006,0.01164298877120018,34.6796875,51,100.0
+entropy,subgrid_100,3d,3d_subgrid_mem_100,3D sine wave (subgrid 100 MiB),Points per parameter axis,5,jax_cpu,JAX CPU,cpu,5.442138411104679,3.2924531139433384,1651.5078125,51,100.0
+entropy,subgrid_100,3d,3d_subgrid_mem_100,3D sine wave (subgrid 100 MiB),Points per parameter axis,10,numpy,NumPy,host,0.18305840715765953,0.04409245401620865,81.45703125,51,100.0
+entropy,subgrid_100,3d,3d_subgrid_mem_100,3D sine wave (subgrid 100 MiB),Points per parameter axis,10,jax_cpu,JAX CPU,cpu,5.515617746859789,3.322562739253044,1688.09765625,51,100.0
+entropy,subgrid_100,3d,3d_subgrid_mem_100,3D sine wave (subgrid 100 MiB),Points per parameter axis,20,numpy,NumPy,host,0.45197102800011635,0.32528313249349594,277.96875,51,100.0
+entropy,subgrid_100,3d,3d_subgrid_mem_100,3D sine wave (subgrid 100 MiB),Points per parameter axis,20,jax_cpu,JAX CPU,cpu,8.250529363751411,6.014691907912493,1907.43359375,51,100.0
+entropy,subgrid_100,3d,3d_subgrid_mem_100,3D sine wave (subgrid 100 MiB),Points per parameter axis,30,numpy,NumPy,host,1.2039795778691769,1.0616310723125935,285.45703125,51,100.0
+entropy,subgrid_100,3d,3d_subgrid_mem_100,3D sine wave (subgrid 100 MiB),Points per parameter axis,30,jax_cpu,JAX CPU,cpu,9.910541158169508,7.650173485279083,1879.546875,51,100.0
+entropy,subgrid_100,3d,3d_subgrid_mem_100,3D sine wave (subgrid 100 MiB),Points per parameter axis,50,numpy,NumPy,host,5.220298811793327,5.082293201237917,230.56640625,51,100.0
+entropy,subgrid_100,3d,3d_subgrid_mem_100,3D sine wave (subgrid 100 MiB),Points per parameter axis,50,jax_cpu,JAX CPU,cpu,12.87644137069583,10.680356781929731,1828.94921875,51,100.0
