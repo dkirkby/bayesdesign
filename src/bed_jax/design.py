@@ -24,6 +24,12 @@ class _AxisBundle:
             raise AttributeError(name) from exc
 
 
+def _segment_sum(values, segment_ids, num_segments):
+    if hasattr(jax.lax, "segment_sum"):
+        return jax.lax.segment_sum(values, segment_ids, num_segments=num_segments)
+    return jax.ops.segment_sum(values, segment_ids, num_segments=num_segments)
+
+
 class ExperimentDesigner:
     """Brute-force expected information gain calculation using JAX arrays."""
 
@@ -33,15 +39,16 @@ class ExperimentDesigner:
         features,
         designs,
         unnorm_lfunc,
-        lfunc_args={},
+        lfunc_args=None,
         mem=None,
+        design_chunk_size=None,
         device=None,
     ):
         self.parameters = parameters
         self.features = features
         self.designs = designs
         self.unnorm_lfunc = unnorm_lfunc
-        self.lfunc_args = lfunc_args
+        self.lfunc_args = {} if lfunc_args is None else lfunc_args
         self.device = resolve_device(device)
 
         for name, grid in (
@@ -54,8 +61,16 @@ class ExperimentDesigner:
                     f"Grid {name} device ({grid.device.platform}) does not match ExperimentDesigner device ({self.device.platform})."
                 )
 
-        if mem is None:
-            self.design_subgrid = int(math.prod(self.designs.shape))
+        total_designs = int(math.prod(self.designs.shape))
+        if mem is not None and design_chunk_size is not None:
+            raise ValueError("Specify at most one of mem or design_chunk_size")
+        if design_chunk_size is not None:
+            if design_chunk_size <= 0:
+                raise ValueError("Design chunk size must be positive")
+            self.design_subgrid = min(int(design_chunk_size), total_designs)
+            self.num_subgrids = math.ceil(total_designs / self.design_subgrid)
+        elif mem is None:
+            self.design_subgrid = total_designs
             self.num_subgrids = 1
         else:
             if mem <= 0:
@@ -67,20 +82,18 @@ class ExperimentDesigner:
                 2
                 * (
                     math.prod(self.features.shape)
-                    * math.prod(self.designs.shape)
+                    * total_designs
                     * math.prod(self.parameters.shape)
                     * 8
                 )
                 / (1 << 20)
             )
-            self.design_subgrid = int(frac * math.prod(self.designs.shape))
-            self.num_subgrids = math.ceil(
-                math.prod(self.designs.shape) / self.design_subgrid
-            )
+            self.design_subgrid = int(frac * total_designs)
+            self.num_subgrids = math.ceil(total_designs / self.design_subgrid)
             if self.design_subgrid == 0:
                 raise ValueError(
                     "Memory limit too low,",
-                    f"invalid subgrid size: {frac * math.prod(self.designs.shape)} < 1",
+                    f"invalid subgrid size: {frac * total_designs} < 1",
                 )
 
         self._initialized = False
@@ -92,6 +105,10 @@ class ExperimentDesigner:
             "get_posterior": {},
         }
         with jax.default_device(self.device):
+            self._param_weights_grid = self._grid_weights(self.parameters)
+            self._param_weights_flat = jnp.reshape(self._param_weights_grid, (-1,))
+            self._feature_weights_grid = self._grid_weights(self.features)
+            self._feature_weights_flat = jnp.reshape(self._feature_weights_grid, (-1,))
             self.EIG = jnp.full(self.designs.shape, jnp.nan)
 
     def _grid_weights(self, grid):
@@ -148,7 +165,7 @@ class ExperimentDesigner:
         expected_shape = self.features.shape + chunk_shape + self.parameters.shape
         feature_axes = tuple(range(feature_ndim))
         feature_weights = jnp.reshape(
-            self._grid_weights(self.features),
+            self._feature_weights_grid,
             self.features.shape + (1,) * (1 + param_ndim),
         )
         params_bundle = self._stacked_axis_bundle(
@@ -239,8 +256,8 @@ class ExperimentDesigner:
         param_shape = tuple(int(v) for v in self.parameters.shape)
         feature_size = int(math.prod(feature_shape))
         subgrid_size = int(math.prod(subgrid_shape))
-        param_weights = self._grid_weights(self.parameters)
-        feature_weights = jnp.reshape(self._grid_weights(self.features), (feature_size,))
+        param_weights = self._param_weights_grid
+        feature_weights = self._feature_weights_flat
 
         def kernel(sub_likelihood, prior, h0):
             flat = jnp.reshape(
@@ -271,6 +288,96 @@ class ExperimentDesigner:
 
         return kernel
 
+    def _make_eig_eval_from_unnorm(self, subgrid_shape):
+        key = tuple(int(v) for v in subgrid_shape)
+        feature_shape = tuple(int(v) for v in self.features.shape)
+        param_shape = tuple(int(v) for v in self.parameters.shape)
+        feature_size = int(math.prod(feature_shape))
+        subgrid_size = int(math.prod(subgrid_shape))
+        param_weights = self._param_weights_grid
+        feature_weights = self._feature_weights_flat
+
+        def kernel(sub_likelihood, prior, h0):
+            flat = jnp.reshape(
+                sub_likelihood,
+                (feature_size, subgrid_size) + param_shape,
+            )
+            design_first = jnp.swapaxes(flat, 0, 1)
+
+            def one_design(feature_rows):
+                norm = jnp.tensordot(feature_weights, feature_rows, axes=(0, 0))
+                safe_norm = jnp.where(norm > 0, norm, jnp.ones_like(norm))
+                norm_positive = norm > 0
+                prior_over_norm = prior / safe_norm
+
+                def one_feature(likelihood_row):
+                    weighted = jnp.where(
+                        norm_positive,
+                        likelihood_row * prior_over_norm,
+                        jnp.zeros_like(likelihood_row),
+                    )
+                    marginal = jnp.sum(weighted * param_weights)
+                    posterior = jnp.where(marginal > 0, weighted / marginal, weighted)
+                    log2post = jnp.where(posterior > 0, jnp.log2(posterior), 0.0)
+                    ig = h0 + jnp.sum(posterior * log2post * param_weights)
+                    ig = jnp.where(marginal > 0, ig, 0.0)
+                    return marginal, ig
+
+                marginals, ig_values = jax.vmap(one_feature)(feature_rows)
+                eig = jnp.sum(feature_weights * marginals * ig_values)
+                return marginals, ig_values, eig
+
+            marginals, ig_values, eig_values = jax.vmap(one_design)(design_first)
+            marginal = jnp.swapaxes(marginals, 0, 1).reshape(feature_shape + key)
+            ig = jnp.swapaxes(ig_values, 0, 1).reshape(feature_shape + key)
+            eig = jnp.reshape(eig_values, key)
+            return marginal, ig, eig
+
+        return kernel
+
+    def _make_eig_only_eval_from_unnorm(self, subgrid_shape):
+        key = tuple(int(v) for v in subgrid_shape)
+        feature_shape = tuple(int(v) for v in self.features.shape)
+        param_shape = tuple(int(v) for v in self.parameters.shape)
+        feature_size = int(math.prod(feature_shape))
+        subgrid_size = int(math.prod(subgrid_shape))
+        param_weights = self._param_weights_grid
+        feature_weights = self._feature_weights_flat
+
+        def kernel(sub_likelihood, prior, h0):
+            flat = jnp.reshape(
+                sub_likelihood,
+                (feature_size, subgrid_size) + param_shape,
+            )
+            design_first = jnp.swapaxes(flat, 0, 1)
+
+            def one_design(feature_rows):
+                norm = jnp.tensordot(feature_weights, feature_rows, axes=(0, 0))
+                safe_norm = jnp.where(norm > 0, norm, jnp.ones_like(norm))
+                norm_positive = norm > 0
+                prior_over_norm = prior / safe_norm
+
+                def one_feature(feature_weight, likelihood_row):
+                    weighted = jnp.where(
+                        norm_positive,
+                        likelihood_row * prior_over_norm,
+                        jnp.zeros_like(likelihood_row),
+                    )
+                    marginal = jnp.sum(weighted * param_weights)
+                    posterior = jnp.where(marginal > 0, weighted / marginal, weighted)
+                    log2post = jnp.where(posterior > 0, jnp.log2(posterior), 0.0)
+                    ig = h0 + jnp.sum(posterior * log2post * param_weights)
+                    ig = jnp.where(marginal > 0, ig, 0.0)
+                    return feature_weight * marginal * ig
+
+                contributions = jax.vmap(one_feature)(feature_weights, feature_rows)
+                return jnp.sum(contributions)
+
+            eig_values = jax.vmap(one_design)(design_first)
+            return jnp.reshape(eig_values, key)
+
+        return kernel
+
     def _get_eig_kernel(self, subgrid_shape):
         key = tuple(int(v) for v in subgrid_shape)
         cache = self._compiled_kernels["calculateEIG"]
@@ -293,17 +400,14 @@ class ExperimentDesigner:
         total_designs = setup["total_designs"]
         num_chunks = setup["num_chunks"]
         expected_shape = setup["expected_shape"]
-        feature_axes = setup["feature_axes"]
-        feature_weights = setup["feature_weights"]
         params_bundle = setup["params_bundle"]
         features_bundle = setup["features_bundle"]
         padded_design_axes = setup["padded_design_axes"]
-        eval_chunk = self._make_eig_eval(chunk_shape)
+        eval_chunk = self._make_eig_eval_from_unnorm(chunk_shape)
+        eval_chunk_eig_only = self._make_eig_only_eval_from_unnorm(chunk_shape)
 
         def kernel(prior, h0):
-            chunk_indices = jnp.arange(num_chunks, dtype=jnp.int32)
-
-            def one_chunk(_, chunk_idx):
+            def eval_chunk_idx(chunk_idx, eig_only=False):
                 start = chunk_idx * key
                 design_axes = {}
                 for name, values in padded_design_axes.items():
@@ -322,15 +426,30 @@ class ExperimentDesigner:
                 likelihood = jnp.asarray(likelihood)
                 if tuple(likelihood.shape) != expected_shape:
                     likelihood = jnp.broadcast_to(likelihood, expected_shape)
-                likelihood_norm = jnp.sum(
-                    likelihood * feature_weights, axis=feature_axes, keepdims=True
-                )
-                likelihood = likelihood / likelihood_norm
-                _, _, eig = eval_chunk(likelihood, prior, h0)
-                return None, eig
+                if eig_only:
+                    return eval_chunk_eig_only(likelihood, prior, h0)
+                return eval_chunk(likelihood, prior, h0)
 
-            _, eig_chunks = jax.lax.scan(one_chunk, None, chunk_indices)
-            return jnp.reshape(eig_chunks, (-1,))[:total_designs]
+            first_marginal, first_ig, first_eig = eval_chunk_idx(
+                jnp.asarray(0, dtype=jnp.int32)
+            )
+
+            if num_chunks == 1:
+                eig_chunks = first_eig[jnp.newaxis, ...]
+            else:
+                chunk_indices = jnp.arange(1, num_chunks, dtype=jnp.int32)
+
+                def one_chunk(_, chunk_idx):
+                    eig = eval_chunk_idx(chunk_idx, eig_only=True)
+                    return None, eig
+
+                _, rest_eigs = jax.lax.scan(one_chunk, None, chunk_indices)
+                eig_chunks = jnp.concatenate(
+                    [first_eig[jnp.newaxis, ...], rest_eigs], axis=0
+                )
+
+            eig_flat = jnp.reshape(eig_chunks, (-1,))[:total_designs]
+            return first_marginal, first_ig, eig_flat
 
         cache[key] = jax.jit(kernel)
         return cache[key]
@@ -348,12 +467,10 @@ class ExperimentDesigner:
         total_designs = setup["total_designs"]
         num_chunks = setup["num_chunks"]
         expected_shape = setup["expected_shape"]
-        feature_axes = setup["feature_axes"]
-        feature_weights = setup["feature_weights"]
         params_bundle = setup["params_bundle"]
         features_bundle = setup["features_bundle"]
         padded_design_axes = setup["padded_design_axes"]
-        eval_chunk = self._get_marginal_eig_kernel(chunk_shape, nuisance_axes)
+        eval_chunk = self._make_marginal_eig_eval_from_unnorm(chunk_shape, nuisance_axes)
 
         def kernel(prior, h0):
             chunk_indices = jnp.arange(num_chunks, dtype=jnp.int32)
@@ -377,10 +494,6 @@ class ExperimentDesigner:
                 likelihood = jnp.asarray(likelihood)
                 if tuple(likelihood.shape) != expected_shape:
                     likelihood = jnp.broadcast_to(likelihood, expected_shape)
-                likelihood_norm = jnp.sum(
-                    likelihood * feature_weights, axis=feature_axes, keepdims=True
-                )
-                likelihood = likelihood / likelihood_norm
                 eig = eval_chunk(likelihood, prior, h0)
                 return None, eig
 
@@ -407,8 +520,9 @@ class ExperimentDesigner:
         feature_size = int(math.prod(feature_shape))
         subgrid_size = int(math.prod(subgrid_shape))
         param_size = int(math.prod(param_shape))
-        param_weights = jnp.reshape(self._grid_weights(self.parameters), (param_size,))
-        feature_weights = jnp.reshape(self._grid_weights(self.features), (feature_size,))
+        param_weights = self._param_weights_flat
+        param_weights_grid = self._param_weights_grid
+        feature_weights = self._feature_weights_flat
 
         def kernel(sub_likelihood, prior, h0):
             flat = jnp.reshape(
@@ -419,15 +533,17 @@ class ExperimentDesigner:
 
             def one_feature(likelihood_row):
                 weighted = likelihood_row * prior
-                marginal = jnp.sum(weighted * jnp.reshape(param_weights, param_shape))
-                posterior = jnp.where(marginal > 0, weighted / marginal, prior)
-                post = jax.ops.segment_sum(
-                    jnp.reshape(posterior, (param_size,)) * param_weights,
+                marginal = jnp.sum(weighted * param_weights_grid)
+                post_weighted = _segment_sum(
+                    jnp.reshape(weighted, (param_size,)) * param_weights,
                     group_ids,
                     num_segments=num_segments,
                 ).reshape(interest_shape)
+                safe_marginal = jnp.where(marginal > 0, marginal, jnp.ones_like(marginal))
+                post = post_weighted / safe_marginal
                 log2post = jnp.where(post > 0, jnp.log2(post), 0.0)
                 ig = h0 + jnp.sum(post * log2post)
+                ig = jnp.where(marginal > 0, ig, 0.0)
                 return marginal, ig
 
             def one_design(feature_rows):
@@ -442,6 +558,59 @@ class ExperimentDesigner:
         cache[key] = jax.jit(kernel)
         return cache[key]
 
+    def _make_marginal_eig_eval_from_unnorm(self, subgrid_shape, nuisance_axes):
+        interest_axes, group_ids, num_segments, interest_shape = self._get_marginal_grouping(
+            nuisance_axes
+        )
+        feature_shape = tuple(int(v) for v in self.features.shape)
+        param_shape = tuple(int(v) for v in self.parameters.shape)
+        feature_size = int(math.prod(feature_shape))
+        subgrid_size = int(math.prod(subgrid_shape))
+        param_size = int(math.prod(param_shape))
+        param_weights = self._param_weights_flat
+        param_weights_grid = self._param_weights_grid
+        feature_weights = self._feature_weights_flat
+
+        def kernel(sub_likelihood, prior, h0):
+            flat = jnp.reshape(
+                sub_likelihood,
+                (feature_size, subgrid_size) + param_shape,
+            )
+            design_first = jnp.swapaxes(flat, 0, 1)
+
+            def one_design(feature_rows):
+                norm = jnp.tensordot(feature_weights, feature_rows, axes=(0, 0))
+                safe_norm = jnp.where(norm > 0, norm, jnp.ones_like(norm))
+                norm_positive = norm > 0
+                prior_over_norm = prior / safe_norm
+
+                def one_feature(likelihood_row):
+                    weighted = jnp.where(
+                        norm_positive,
+                        likelihood_row * prior_over_norm,
+                        jnp.zeros_like(likelihood_row),
+                    )
+                    marginal = jnp.sum(weighted * param_weights_grid)
+                    post_weighted = _segment_sum(
+                        jnp.reshape(weighted, (param_size,)) * param_weights,
+                        group_ids,
+                        num_segments=num_segments,
+                    ).reshape(interest_shape)
+                    safe_marginal = jnp.where(marginal > 0, marginal, jnp.ones_like(marginal))
+                    post = post_weighted / safe_marginal
+                    log2post = jnp.where(post > 0, jnp.log2(post), 0.0)
+                    ig = h0 + jnp.sum(post * log2post)
+                    ig = jnp.where(marginal > 0, ig, 0.0)
+                    return marginal, ig
+
+                marginals, ig_values = jax.vmap(one_feature)(feature_rows)
+                return jnp.sum(feature_weights * marginals * ig_values)
+
+            eig_values = jax.vmap(one_design)(design_first)
+            return jnp.reshape(eig_values, subgrid_shape)
+
+        return kernel
+
     def _get_posterior_kernel(self, cond_shapes):
         key = tuple(tuple(int(v) for v in shape) for shape in cond_shapes)
         cache = self._compiled_kernels["get_posterior"]
@@ -450,7 +619,7 @@ class ExperimentDesigner:
 
         param_ndim = len(self.parameters.shape)
         sum_axes = tuple(range(-param_ndim, 0))
-        param_weights = self._grid_weights(self.parameters)
+        param_weights = self._param_weights_grid
 
         def kernel(likelihood, prior):
             weighted = likelihood * prior
@@ -477,16 +646,10 @@ class ExperimentDesigner:
         total_designs = int(math.prod(self.designs.shape))
 
         if self.num_subgrids > 1 and not debug:
-            first_subgrid, _ = next(self.designs.subgrid(self.design_subgrid))
-            self.subgrid_shape = first_subgrid.shape
-            with GridStack(self.features, first_subgrid, self.parameters):
-                first_likelihood = self.likelihood_func(first_subgrid)
-                first_kernel = self._get_eig_kernel(self.subgrid_shape)
-                marginal, ig, _ = first_kernel(first_likelihood, self.prior, h0)
-                self.marginal = marginal
-                self.IG = ig
-
-            eig_flat = self._get_chunked_eig_kernel()(self.prior, h0)
+            self.subgrid_shape = self._get_chunk_scan_setup()["chunk_shape"]
+            marginal, ig, eig_flat = self._get_chunked_eig_kernel()(self.prior, h0)
+            self.marginal = marginal
+            self.IG = ig
             self.EIG = jnp.reshape(eig_flat, self.designs.shape)
             self._initialized = True
             return self.designs.getmax(self.EIG)
@@ -567,8 +730,8 @@ class ExperimentDesigner:
             nuisance_axes
         )
         param_size = int(math.prod(self.parameters.shape))
-        param_weights = jnp.reshape(self._grid_weights(self.parameters), (param_size,))
-        prior_interest = jax.ops.segment_sum(
+        param_weights = self._param_weights_flat
+        prior_interest = _segment_sum(
             jnp.reshape(self.prior, (param_size,)) * param_weights,
             group_ids,
             num_segments=num_segments,

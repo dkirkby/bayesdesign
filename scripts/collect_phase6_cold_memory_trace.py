@@ -35,7 +35,9 @@ def parse_args():
         help="Whether the trace starts at process launch or after worker setup is ready.",
     )
     parser.add_argument("--design-points-1d", type=int, default=51)
+    parser.add_argument("--feature-points-1d", type=int, default=100)
     parser.add_argument("--subgrid-mem-mb", type=float, default=50.0)
+    parser.add_argument("--design-chunk-size", type=int)
     parser.add_argument("--gpu", action="store_true", help="Run JAX traces on GPU.")
     parser.add_argument("--worker", action="store_true")
     parser.add_argument("--backend", choices=("numpy", "jax"))
@@ -71,9 +73,15 @@ def load_numpy_backend():
 def load_jax_backend(gpu: bool = False):
     if gpu:
         os.environ["JAX_PLATFORM_NAME"] = "gpu"
+    # Enforce true cold-start behavior for benchmarking by disabling
+    # persistent compilation caches in each worker process.
+    os.environ["JAX_ENABLE_COMPILATION_CACHE"] = "0"
+    os.environ.pop("JAX_COMPILATION_CACHE_DIR", None)
     import jax
 
     jax.config.update("jax_enable_x64", True)
+    jax.config.update("jax_enable_compilation_cache", False)
+    jax.clear_caches()
     import jax.numpy as jnp
 
     from bed_jax.design import ExperimentDesigner
@@ -100,13 +108,20 @@ def _sine_lfunc(params, features, designs, xp, sigma_y):
     return xp.exp(-0.5 * (y_diff / sigma_y) ** 2)
 
 
-def build_1d_case(backend, n_param, mem=None, design_points=51):
+def build_1d_case(
+    backend,
+    n_param,
+    mem=None,
+    design_points=51,
+    feature_points=100,
+    design_chunk_size=None,
+):
     xp = backend["xp"]
     Grid = backend["Grid"]
     ExperimentDesigner = backend["ExperimentDesigner"]
 
     designs = Grid(t_obs=xp.linspace(0, 5, design_points))
-    features = Grid(y_obs=xp.linspace(-1.25, 1.25, 100))
+    features = Grid(y_obs=xp.linspace(-1.25, 1.25, feature_points))
     params = Grid(
         amplitude=xp.asarray(1.0),
         frequency=xp.linspace(0.2, 2.0, n_param),
@@ -119,12 +134,13 @@ def build_1d_case(backend, n_param, mem=None, design_points=51):
         lambda p, f, d, **kwargs: _sine_lfunc(p, f, d, xp, kwargs["sigma_y"]),
         lfunc_args={"sigma_y": 0.1},
         mem=mem,
+        design_chunk_size=design_chunk_size,
     )
     prior = params.normalize(xp.ones(params.shape))
     return designer, prior
 
 
-def build_3d_case(backend, n_per_axis, mem=None):
+def build_3d_case(backend, n_per_axis, mem=None, design_chunk_size=None):
     xp = backend["xp"]
     Grid = backend["Grid"]
     TopHat = backend["TopHat"]
@@ -150,6 +166,7 @@ def build_3d_case(backend, n_per_axis, mem=None):
         unnorm_lfunc,
         lfunc_args={"sigma_y": 0.1},
         mem=mem,
+        design_chunk_size=design_chunk_size,
     )
     prior_amp = TopHat(xp.linspace(0.5, 1.5, n_per_axis))
     prior_freq = TopHat(xp.linspace(0.2, 2.0, n_per_axis))
@@ -170,19 +187,35 @@ def run_worker(args):
     )
     if args.scenario == "1d_full":
         designer, prior = build_1d_case(
-            backend, args.size, mem=None, design_points=args.design_points_1d
+            backend,
+            args.size,
+            mem=None,
+            design_points=args.design_points_1d,
+            feature_points=args.feature_points_1d,
+            design_chunk_size=args.design_chunk_size,
         )
     elif args.scenario == "1d_subgrid":
+        subgrid_mem_mb = None if args.design_chunk_size is not None else args.subgrid_mem_mb
         designer, prior = build_1d_case(
             backend,
             args.size,
-            mem=args.subgrid_mem_mb,
+            mem=subgrid_mem_mb,
             design_points=args.design_points_1d,
+            feature_points=args.feature_points_1d,
+            design_chunk_size=args.design_chunk_size,
         )
     elif args.scenario == "3d_full":
-        designer, prior = build_3d_case(backend, args.size, mem=None)
+        designer, prior = build_3d_case(
+            backend, args.size, mem=None, design_chunk_size=args.design_chunk_size
+        )
     else:
-        designer, prior = build_3d_case(backend, args.size, mem=args.subgrid_mem_mb)
+        subgrid_mem_mb = None if args.design_chunk_size is not None else args.subgrid_mem_mb
+        designer, prior = build_3d_case(
+            backend,
+            args.size,
+            mem=subgrid_mem_mb,
+            design_chunk_size=args.design_chunk_size,
+        )
 
     print(json.dumps({"status": "ready"}), flush=True)
     sys.stdin.readline()
@@ -216,6 +249,8 @@ def trace_case(
     time_origin: str,
     design_points_1d: int,
     subgrid_mem_mb: float,
+    feature_points_1d: int = 100,
+    design_chunk_size: int | None = None,
     gpu: bool = False,
 ) -> dict:
     cmd = [
@@ -232,9 +267,13 @@ def trace_case(
         str(size),
         "--design-points-1d",
         str(design_points_1d),
+        "--feature-points-1d",
+        str(feature_points_1d),
         "--subgrid-mem-mb",
         str(subgrid_mem_mb),
     ]
+    if design_chunk_size is not None:
+        cmd.extend(["--design-chunk-size", str(design_chunk_size)])
     if gpu:
         cmd.append("--gpu")
     proc = subprocess.Popen(
@@ -377,7 +416,9 @@ def main():
                 args.time_origin,
                 args.design_points_1d,
                 args.subgrid_mem_mb,
-                args.gpu,
+                feature_points_1d=args.feature_points_1d,
+                design_chunk_size=args.design_chunk_size,
+                gpu=args.gpu,
             )
         )
 

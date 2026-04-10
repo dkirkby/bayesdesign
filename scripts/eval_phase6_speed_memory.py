@@ -23,7 +23,7 @@ MEASURES = {
         "display_name": "subgrid 100 MiB",
         "series": (
             ("1d", "1d_subgrid_mem_100", "1D sine wave (subgrid 100 MiB)", "Frequency grid points", [50, 500, 1500, 5000, 10000, 20000], "1d_subgrid", 100.0),
-            ("3d", "3d_subgrid_mem_100", "3D sine wave (subgrid 100 MiB)", "Points per parameter axis", [5, 10, 20, 30, 50], "3d_subgrid", 100.0),
+            ("3d", "3d_subgrid_mem_100", "3D sine wave (subgrid 100 MiB)", "Points per parameter axis", [5, 10, 20, 30, 50, 100], "3d_subgrid", 100.0),
         ),
         "default_csv": "benchmark_results/tables/macbook_subgrid_100.csv",
     },
@@ -61,6 +61,7 @@ def main():
                         x,
                         series_label,
                         args.sample_interval,
+                        "process",
                         args.design_points_1d,
                         mem_value,
                         gpu=use_gpu,

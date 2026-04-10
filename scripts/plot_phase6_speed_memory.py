@@ -16,14 +16,12 @@ from matplotlib.lines import Line2D
 
 
 LINESTYLES = ["-", "--", "-.", ":"]
-COLOR_BY_CURVE_BACKEND = {
-    ("1d", "numpy"): "#9ecae1",
-    ("1d", "jax_cpu"): "tab:blue",
-    ("1d", "jax_gpu"): "tab:blue",
-    ("3d", "numpy"): "#a1d99b",
-    ("3d", "jax_cpu"): "tab:green",
-    ("3d", "jax_gpu"): "tab:green",
-}
+COLOR_FAMILIES = [
+    {"numpy": "#9ecae1", "jax": "tab:blue"},
+    {"numpy": "#a1d99b", "jax": "tab:green"},
+    {"numpy": "#fdd0a2", "jax": "tab:orange"},
+    {"numpy": "#dadaeb", "jax": "tab:purple"},
+]
 LABEL_BY_CURVE_BACKEND = {
     ("1d", "numpy"): "1D sine wave: NumPy",
     ("1d", "jax_cpu"): "1D sine wave: JAX",
@@ -38,6 +36,11 @@ def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("csv_paths", type=Path, nargs="+")
     parser.add_argument("--measure", choices=("full_grid", "subgrid_100"), required=True)
+    parser.add_argument(
+        "--curve-family",
+        choices=("1d", "3d"),
+        help="Plot only one curve family as a 2-row figure.",
+    )
     parser.add_argument("--output", type=Path, required=True)
     return parser.parse_args()
 
@@ -52,6 +55,13 @@ def _load_rows(path: Path) -> list[dict]:
     return rows
 
 
+def _color_for(path: Path, backend_key: str, csv_paths: list[Path]) -> str:
+    family = COLOR_FAMILIES[csv_paths.index(path) % len(COLOR_FAMILIES)]
+    if backend_key == "numpy":
+        return family["numpy"]
+    return family["jax"]
+
+
 def main():
     args = parse_args()
     rows_by_csv = {path: _load_rows(path) for path in args.csv_paths}
@@ -59,10 +69,23 @@ def main():
         path: LINESTYLES[idx % len(LINESTYLES)] for idx, path in enumerate(args.csv_paths)
     }
 
-    fig, axes = plt.subplots(2, 2, figsize=(12.5, 8.0), sharey="row")
-    ax_t1, ax_t3 = axes[0]
-    ax_m1, ax_m3 = axes[1]
-    for ax in axes.flat:
+    if args.curve_family:
+        fig, axes = plt.subplots(2, 1, figsize=(7.6, 7.4), sharex=True)
+        plot_axes = {
+            args.curve_family: (axes[0], axes[1]),
+        }
+        all_axes = axes
+    else:
+        fig, axes = plt.subplots(2, 2, figsize=(12.5, 8.0), sharey="row")
+        ax_t1, ax_t3 = axes[0]
+        ax_m1, ax_m3 = axes[1]
+        plot_axes = {
+            "1d": (ax_t1, ax_m1),
+            "3d": (ax_t3, ax_m3),
+        }
+        all_axes = axes.flat
+
+    for ax in all_axes:
         ax.grid(axis="y", alpha=0.25, linewidth=0.6)
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
@@ -73,34 +96,46 @@ def main():
             grouped[(path, row["curve_family"], row["backend_key"])].append(row)
 
     for (path, curve_family, backend_key), rows in grouped.items():
+        if args.curve_family and curve_family != args.curve_family:
+            continue
         rows = sorted(rows, key=lambda r: r["x_value"])
         xs = [r["x_value"] for r in rows]
         time_ys = [r["total_elapsed_s"] for r in rows]
         mem_ys = [r["peak_rss_mb"] for r in rows]
-        color = COLOR_BY_CURVE_BACKEND[(curve_family, backend_key)]
+        color = _color_for(path, backend_key, args.csv_paths)
         linestyle = linestyle_by_csv[path]
-        if curve_family == "1d":
-            ax_t1.plot(xs, time_ys, color=color, linestyle=linestyle, marker="o", linewidth=2.0)
-            ax_m1.plot(xs, mem_ys, color=color, linestyle=linestyle, marker="o", linewidth=2.0)
-        else:
-            ax_t3.plot(xs, time_ys, color=color, linestyle=linestyle, marker="o", linewidth=2.0)
-            ax_m3.plot(xs, mem_ys, color=color, linestyle=linestyle, marker="o", linewidth=2.0)
+        ax_t, ax_m = plot_axes[curve_family]
+        ax_t.plot(xs, time_ys, color=color, linestyle=linestyle, marker="o", linewidth=2.0)
+        ax_m.plot(xs, mem_ys, color=color, linestyle=linestyle, marker="o", linewidth=2.0)
 
     title_suffix = "full-grid" if args.measure == "full_grid" else "subgrid 100 MiB"
-    ax_t1.set_title(f"1D sine wave: {title_suffix}")
-    ax_t3.set_title(f"3D sine wave: {title_suffix}")
-    ax_t1.set_ylabel("Cold-start total time (s)")
-    ax_m1.set_ylabel("Peak RSS (MB)")
-    ax_t1.set_xlabel("Frequency grid points")
-    ax_m1.set_xlabel("Frequency grid points")
-    ax_t3.set_xlabel("Points per parameter axis")
-    ax_m3.set_xlabel("Points per parameter axis")
+    if args.curve_family == "1d":
+        ax_t, ax_m = plot_axes["1d"]
+        ax_t.set_title(f"1D sine wave: {title_suffix}")
+        ax_t.set_ylabel("Cold-start total time (s)")
+        ax_m.set_ylabel("Peak RSS (MB)")
+        ax_m.set_xlabel("Frequency grid points")
+    elif args.curve_family == "3d":
+        ax_t, ax_m = plot_axes["3d"]
+        ax_t.set_title(f"3D sine wave: {title_suffix}")
+        ax_t.set_ylabel("Cold-start total time (s)")
+        ax_m.set_ylabel("Peak RSS (MB)")
+        ax_m.set_xlabel("Points per parameter axis")
+    else:
+        ax_t1.set_title(f"1D sine wave: {title_suffix}")
+        ax_t3.set_title(f"3D sine wave: {title_suffix}")
+        ax_t1.set_ylabel("Cold-start total time (s)")
+        ax_m1.set_ylabel("Peak RSS (MB)")
+        ax_t1.set_xlabel("Frequency grid points")
+        ax_m1.set_xlabel("Frequency grid points")
+        ax_t3.set_xlabel("Points per parameter axis")
+        ax_m3.set_xlabel("Points per parameter axis")
 
     curve_handles = [
         Line2D(
             [0],
             [0],
-            color=COLOR_BY_CURVE_BACKEND[key],
+            color=COLOR_FAMILIES[0]["numpy" if key[1] == "numpy" else "jax"],
             linewidth=2.0,
             label=LABEL_BY_CURVE_BACKEND[key],
         )
@@ -135,21 +170,41 @@ def main():
         if key in present_backend_keys or (key[1] == "jax_cpu" and (key[0], "jax_gpu") in present_backend_keys)
     ]
 
-    ax_t1.legend(
-        handles=[h for h in curve_handles if h.get_label().startswith("1D")],
-        frameon=False,
-        loc="upper left",
-        title="Backend",
-    )
-    ax_t3.legend(
-        handles=[h for h in curve_handles if h.get_label().startswith("3D")],
-        frameon=False,
-        loc="upper left",
-        title="Backend",
-    )
-    fig.legend(handles=device_handles, frameon=False, loc="lower center", ncol=max(1, len(device_handles)), title="Device")
+    if args.curve_family == "1d":
+        ax_t, _ = plot_axes["1d"]
+        ax_t.legend(
+            handles=[h for h in curve_handles if h.get_label().startswith("1D")],
+            frameon=False,
+            loc="upper left",
+            title="Backend",
+        )
+    elif args.curve_family == "3d":
+        ax_t, _ = plot_axes["3d"]
+        ax_t.legend(
+            handles=[h for h in curve_handles if h.get_label().startswith("3D")],
+            frameon=False,
+            loc="upper left",
+            title="Backend",
+        )
+    else:
+        ax_t1.legend(
+            handles=[h for h in curve_handles if h.get_label().startswith("1D")],
+            frameon=False,
+            loc="upper left",
+            title="Backend",
+        )
+        ax_t3.legend(
+            handles=[h for h in curve_handles if h.get_label().startswith("3D")],
+            frameon=False,
+            loc="upper left",
+            title="Backend",
+        )
 
-    fig.tight_layout(rect=(0, 0.06, 1, 1))
+    if len(device_handles) > 1:
+        fig.legend(handles=device_handles, frameon=False, loc="lower center", ncol=max(1, len(device_handles)), title="Device")
+        fig.tight_layout(rect=(0, 0.06, 1, 1))
+    else:
+        fig.tight_layout()
     args.output.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(args.output, dpi=220, bbox_inches="tight")
     print(args.output)

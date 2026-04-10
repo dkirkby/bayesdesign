@@ -6,7 +6,16 @@ from bed.grid import Grid, GridStack
 class ExperimentDesigner:
     """Brute force calculation of expected information gain using Grids to define the parameters, features, and designs."""
 
-    def __init__(self, parameters, features, designs, unnorm_lfunc, lfunc_args={}, mem=None):
+    def __init__(
+        self,
+        parameters,
+        features,
+        designs,
+        unnorm_lfunc,
+        lfunc_args={},
+        mem=None,
+        design_chunk_size=None,
+    ):
         """Initialize an experiment designer.
 
         Parameters
@@ -24,14 +33,24 @@ class ExperimentDesigner:
             additional parameters that are required to evaluate the likelihood function
         mem : float
             memory limit in MB
+        design_chunk_size : int
+            explicit number of designs to process per chunk; mutually exclusive with mem
         """
         self.parameters = parameters
         self.features = features
         self.designs = designs
         self.unnorm_lfunc = unnorm_lfunc
         self.lfunc_args = lfunc_args
-        if mem is None:
-            self.design_subgrid = int(np.prod(self.designs.shape))
+        total_designs = int(np.prod(self.designs.shape))
+        if mem is not None and design_chunk_size is not None:
+            raise ValueError("Specify at most one of mem or design_chunk_size")
+        if design_chunk_size is not None:
+            if design_chunk_size <= 0:
+                raise ValueError("Design chunk size must be positive")
+            self.design_subgrid = min(int(design_chunk_size), total_designs)
+            self.num_subgrids = np.ceil(total_designs / self.design_subgrid)
+        elif mem is None:
+            self.design_subgrid = total_designs
             self.num_subgrids = 1
         else:
             if mem <= 0:
@@ -39,12 +58,12 @@ class ExperimentDesigner:
             # Calculate the fractional decrease required to meet the memory limit
             # accounting for the fact that the buffer doubles the memory usage.
             frac = mem / (2 * (np.prod(self.features.shape) * 
-                np.prod(self.designs.shape) * 
+                total_designs * 
                 np.prod(self.parameters.shape) * 8)/(1 << 20))
-            self.design_subgrid = int(frac * np.prod(self.designs.shape))
-            self.num_subgrids = np.ceil(np.prod(self.designs.shape) / self.design_subgrid)
+            self.design_subgrid = int(frac * total_designs)
+            self.num_subgrids = np.ceil(total_designs / self.design_subgrid)
             if self.design_subgrid == 0:
-                raise ValueError("Memory limit too low,", f"invalid subgrid size: {frac * np.prod(self.designs.shape)} < 1")
+                raise ValueError("Memory limit too low,", f"invalid subgrid size: {frac * total_designs} < 1")
         self._initialized = False
         self.EIG = np.full(self.designs.shape, np.nan)
 
