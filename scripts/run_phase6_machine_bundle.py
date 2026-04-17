@@ -28,12 +28,6 @@ from collect_phase6_cold_memory_trace import trace_case
 POINTS = [10, 20, 40, 80]
 CHUNKS = [20, 10, 5, 1]
 CHUNK_LIGHTEN = {20: 0.00, 10: 0.16, 5: 0.30, 1: 0.46}
-# NVML GPU time series: start once usage reaches this fraction of ready-level MiB
-# (skips the long tail where the PID reports ~0 before the main pool appears).
-GPU_TIMESERIES_BASELINE_FRAC = 0.92
-# End the series at the last sample still ≥ this fraction of peak MiB (drops the
-# cliff to ~0 when the worker exits and NVML no longer attributes VRAM to the PID).
-GPU_TIMESERIES_TEARDOWN_FRAC = 0.85
 
 
 def parse_args() -> argparse.Namespace:
@@ -52,6 +46,24 @@ def parse_args() -> argparse.Namespace:
         choices=("cpu", "gpu"),
         default="cpu",
         help="Device to run JAX on. 'gpu' skips NumPy traces and uses GPU memory instead of RSS.",
+    )
+    parser.add_argument(
+        "--jax-preallocate",
+        choices=("true", "false"),
+        default=None,
+        help="Override XLA_PYTHON_CLIENT_PREALLOCATE for JAX traces.",
+    )
+    parser.add_argument(
+        "--jax-allocator",
+        choices=("default", "platform"),
+        default=None,
+        help="Set XLA_PYTHON_CLIENT_ALLOCATOR for JAX traces.",
+    )
+    parser.add_argument(
+        "--jax-mem-fraction",
+        type=float,
+        default=None,
+        help="Set XLA_PYTHON_CLIENT_MEM_FRACTION (0,1] for JAX traces.",
     )
     return parser.parse_args()
 
@@ -115,7 +127,15 @@ def ensure_legacy_macbook_seed(root: Path, styles: dict[str, str]) -> None:
     styles.setdefault("macbook", "tab:blue")
 
 
-def collect_machine(root: Path, machine: str, sample_interval: float, device: str = "cpu") -> None:
+def collect_machine(
+    root: Path,
+    machine: str,
+    sample_interval: float,
+    device: str = "cpu",
+    jax_preallocate: str | None = None,
+    jax_allocator: str | None = None,
+    jax_mem_fraction: float | None = None,
+) -> None:
     use_gpu = device == "gpu"
     if not use_gpu:
         # Enforce CPU paths for JAX traces.
@@ -166,6 +186,9 @@ def collect_machine(root: Path, machine: str, sample_interval: float, device: st
                     50.0,
                     design_chunk_size=None,
                     gpu=use_gpu,
+                    jax_preallocate=jax_preallocate,
+                    jax_allocator=jax_allocator,
+                    jax_mem_fraction=jax_mem_fraction,
                 )
             )
         except RuntimeError as exc:
@@ -208,6 +231,9 @@ def collect_machine(root: Path, machine: str, sample_interval: float, device: st
                         50.0,
                         design_chunk_size=c,
                         gpu=use_gpu,
+                        jax_preallocate=jax_preallocate,
+                        jax_allocator=jax_allocator,
+                        jax_mem_fraction=jax_mem_fraction,
                     )
                 )
             except RuntimeError as exc:
@@ -260,7 +286,7 @@ def ratios_from_traces(
 
 
 def absolutes_from_traces(
-    traces: list[dict], scenario: str, mem_key: str = "peak_gpu_mb",
+    traces: list[dict], scenario: str, mem_key: str = "jax_peak_gpu_mb",
 ) -> dict[int, tuple[float, float]]:
     """Extract absolute (time, memory) for JAX traces by grid size."""
     out: dict[int, tuple[float, float]] = {}
@@ -281,9 +307,11 @@ def write_machine_csvs(
 
     if use_gpu:
         # Write absolute JAX-only CSVs (no ratios possible without NumPy).
+        # For GPU mode we use jax_peak_gpu_mb by default (active JAX-reported peak),
+        # which is less sensitive to allocator reservation behavior than NVML PID peak.
         with (mdir / "full_grid_3d_absolute.csv").open("w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
-            w.writerow(["points_per_axis", "total_elapsed_s", "peak_gpu_mb"])
+            w.writerow(["points_per_axis", "total_elapsed_s", "jax_peak_gpu_mb"])
             vals = absolutes_from_traces(traces["full"], "3d_full", mem_key=mem_key)
             for p in POINTS:
                 if p in vals:
@@ -292,7 +320,7 @@ def write_machine_csvs(
 
         with (mdir / "subgrid_chunk_absolute.csv").open("w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
-            w.writerow(["design_chunk_size", "points_per_axis", "total_elapsed_s", "peak_gpu_mb"])
+            w.writerow(["design_chunk_size", "points_per_axis", "total_elapsed_s", "jax_peak_gpu_mb"])
             for c in CHUNKS:
                 if c not in traces["chunks"]:
                     continue
@@ -329,57 +357,29 @@ def to_ready_relative(
     trace: dict, sample_key: str = "rss_mb",
 ) -> tuple[np.ndarray, np.ndarray]:
     t = np.asarray(trace["samples"]["t_s"], dtype=float)
-    r = np.asarray(trace["samples"].get(sample_key, trace["samples"]["rss_mb"]), dtype=float)
+    if sample_key == "jax_gpu_mb":
+        r_vals = trace["samples"].get("jax_gpu_mb", trace["samples"].get("gpu_mb", trace["samples"]["rss_mb"]))
+    else:
+        r_vals = trace["samples"].get(sample_key, trace["samples"]["rss_mb"])
+    r = np.asarray(r_vals, dtype=float)
     t_ready = float(trace["ready_elapsed_s"])
     r_ready = np.interp(t_ready, t, r)
     return t - t_ready, r - r_ready
 
 
-def _trim_gpu_teardown_tail(
-    t: np.ndarray,
-    r: np.ndarray,
-    teardown_frac: float = GPU_TIMESERIES_TEARDOWN_FRAC,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Truncate after the last in-plateau NVML sample (usage ≥ *teardown_frac* × peak)."""
-    t = np.asarray(t, dtype=float)
-    r = np.asarray(r, dtype=float)
-    if r.size == 0:
-        return t, r
-    peak = float(np.max(r))
-    if peak < 100.0:
-        return t, r
-    thr = teardown_frac * peak
-    above = np.flatnonzero(r >= thr)
-    if above.size == 0:
-        return t, r
-    i_end = int(above[-1])
-    return t[: i_end + 1], r[: i_end + 1]
-
-
 def gpu_abs_series_from_alloc_baseline(
     trace: dict,
     sample_key: str = "gpu_mb",
-    baseline_frac: float = GPU_TIMESERIES_BASELINE_FRAC,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Absolute GPU MiB vs time relative to worker ready (``t = 0`` at ready).
-
-    Drops leading samples where NVML is still below *baseline_frac* of ready-level
-    MiB, and trailing samples after VRAM attributed to the PID collapses on process exit.
-    """
+    """Absolute GPU MiB vs time relative to worker ready (``t = 0`` at ready)."""
     t = np.asarray(trace["samples"]["t_s"], dtype=float)
-    r = np.asarray(trace["samples"].get(sample_key, trace["samples"]["rss_mb"]), dtype=float)
+    if sample_key == "jax_gpu_mb":
+        r_vals = trace["samples"].get("jax_gpu_mb", trace["samples"].get("gpu_mb", trace["samples"]["rss_mb"]))
+    else:
+        r_vals = trace["samples"].get(sample_key, trace["samples"]["rss_mb"])
+    r = np.asarray(r_vals, dtype=float)
     t_ready = float(trace["ready_elapsed_s"])
-    r_at_ready = float(np.interp(t_ready, t, r))
-    if r_at_ready <= 100.0:
-        return _trim_gpu_teardown_tail(t - t_ready, r)
-    thr = baseline_frac * r_at_ready
-    hit = np.flatnonzero(r >= thr)
-    if hit.size == 0:
-        return _trim_gpu_teardown_tail(t - t_ready, r)
-    i0 = int(hit[0])
-    t_plot = t[i0:] - t_ready
-    r_plot = r[i0:]
-    return _trim_gpu_teardown_tail(t_plot, r_plot)
+    return t - t_ready, r
 
 
 def pick_trace(traces: list[dict], scenario: str, size: int, backend: str) -> dict | None:
@@ -504,10 +504,12 @@ def plot_time_series_full(
     root: Path, all_data: dict[str, dict], styles: dict[str, str],
     sample_key: str = "rss_mb",
 ) -> Path:
-    suffix = "_gpu" if sample_key == "gpu_mb" else ""
+    suffix = "_gpu" if sample_key in ("gpu_mb", "jax_gpu_mb") else ""
     out = root / f"cold_memory_trace_3d_full_p80_timeseries_ready_all_machines{suffix}.png"
-    mem_name = "GPU Memory" if sample_key == "gpu_mb" else "RSS"
+    mem_name = "GPU Memory" if sample_key in ("gpu_mb", "jax_gpu_mb") else "RSS"
     use_abs_gpu = sample_key == "gpu_mb"
+    if sample_key == "jax_gpu_mb":
+        use_abs_gpu = True
     fig, ax = plt.subplots(figsize=(9.2, 5.2))
     for machine, data in sorted(all_data.items()):
         base = styles[machine]
@@ -526,7 +528,10 @@ def plot_time_series_full(
     ax.set_title("3D full-grid (points=80): memory time series")
     ax.set_xlabel("Elapsed time relative to worker ready state (s)")
     if use_abs_gpu:
-        ax.set_ylabel(f"Worker {mem_name} (MB, NVML PID)")
+        if sample_key == "jax_gpu_mb":
+            ax.set_ylabel("JAX bytes_in_use (MB)")
+        else:
+            ax.set_ylabel(f"Worker {mem_name} (MB, NVML PID)")
     else:
         ax.set_ylabel(f"Worker {mem_name} delta from ready state (MB)")
     ax.grid(axis="y", alpha=0.25)
@@ -542,10 +547,12 @@ def plot_time_series_chunk5(
     root: Path, all_data: dict[str, dict], styles: dict[str, str],
     sample_key: str = "rss_mb",
 ) -> Path:
-    suffix = "_gpu" if sample_key == "gpu_mb" else ""
+    suffix = "_gpu" if sample_key in ("gpu_mb", "jax_gpu_mb") else ""
     out = root / f"cold_memory_trace_3d_subgrid_chunk5_p80_timeseries_ready_all_machines{suffix}.png"
-    mem_name = "GPU Memory" if sample_key == "gpu_mb" else "RSS"
+    mem_name = "GPU Memory" if sample_key in ("gpu_mb", "jax_gpu_mb") else "RSS"
     use_abs_gpu = sample_key == "gpu_mb"
+    if sample_key == "jax_gpu_mb":
+        use_abs_gpu = True
     fig, ax = plt.subplots(figsize=(9.2, 5.2))
     for machine, data in sorted(all_data.items()):
         base = styles[machine]
@@ -568,7 +575,10 @@ def plot_time_series_chunk5(
     ax.set_title("3D subgrid (chunk=5, points=80): memory time series")
     ax.set_xlabel("Elapsed time relative to worker ready state (s)")
     if use_abs_gpu:
-        ax.set_ylabel(f"Worker {mem_name} (MB, NVML PID)")
+        if sample_key == "jax_gpu_mb":
+            ax.set_ylabel("JAX bytes_in_use (MB)")
+        else:
+            ax.set_ylabel(f"Worker {mem_name} (MB, NVML PID)")
     else:
         ax.set_ylabel(f"Worker {mem_name} delta from ready state (MB)")
     ax.grid(axis="y", alpha=0.25)
@@ -591,11 +601,19 @@ def main() -> None:
     save_styles(styles_path, styles)
 
     use_gpu = args.device == "gpu"
-    mem_key = "peak_gpu_mb" if use_gpu else "peak_rss_mb"
-    sample_key = "gpu_mb" if use_gpu else "rss_mb"
+    mem_key = "jax_peak_gpu_mb" if use_gpu else "peak_rss_mb"
+    sample_key = "jax_gpu_mb" if use_gpu else "rss_mb"
 
     if not args.skip_collect:
-        collect_machine(root, args.machine, args.sample_interval, device=args.device)
+        collect_machine(
+            root,
+            args.machine,
+            args.sample_interval,
+            device=args.device,
+            jax_preallocate=args.jax_preallocate,
+            jax_allocator=args.jax_allocator,
+            jax_mem_fraction=args.jax_mem_fraction,
+        )
 
     all_data: dict[str, dict] = {}
     for machine in sorted(styles):

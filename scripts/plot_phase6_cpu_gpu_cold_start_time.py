@@ -25,6 +25,9 @@ import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
+CHUNKS = [20, 10, 5, 1]
+CHUNK_LIGHTEN = {20: 0.00, 10: 0.16, 5: 0.30, 1: 0.46}
+
 
 def _normalize_color(spec: str) -> str:
     s = spec.strip()
@@ -56,6 +59,11 @@ def _machine_line_color(root: Path, machine: str) -> str:
     return "tab:green"
 
 
+def _lighten(color: str, amount: float) -> tuple[float, float, float]:
+    r, g, b = mcolors.to_rgb(color)
+    return (r + (1 - r) * amount, g + (1 - g) * amount, b + (1 - b) * amount)
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--machine", required=True, help="Machine label under benchmark_results/machines/")
@@ -77,6 +85,11 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=None,
         help="Design chunk size for 3d_subgrid (required when --scenario 3d_subgrid).",
+    )
+    p.add_argument(
+        "--all-chunks",
+        action="store_true",
+        help="For 3d_subgrid, overlay chunk=20/10/5/1 on one plot.",
     )
     return p.parse_args()
 
@@ -107,93 +120,142 @@ def _load_times(path: Path, scenario: str, want_kind: str) -> dict[int, float]:
 
 def main() -> None:
     args = parse_args()
-    if args.scenario == "3d_subgrid" and args.chunk is None:
+    if args.all_chunks and args.scenario != "3d_subgrid":
+        raise SystemExit("--all-chunks is only valid with --scenario 3d_subgrid")
+    if args.scenario == "3d_subgrid" and not args.all_chunks and args.chunk is None:
         raise SystemExit("--chunk is required when --scenario 3d_subgrid")
-
-    cpu_path = _json_path(args.output_root, args.machine, args.scenario, gpu=False, chunk=args.chunk)
-    gpu_path = _json_path(args.output_root, args.machine, args.scenario, gpu=True, chunk=args.chunk)
-
-    cpu_by_n = _load_times(cpu_path, args.scenario, "cpu")
-    gpu_by_n = _load_times(gpu_path, args.scenario, "gpu")
-
-    xs = sorted(set(cpu_by_n) & set(gpu_by_n))
-    if not xs:
-        raise SystemExit(
-            f"No overlapping JAX sizes between CPU and GPU traces for {args.machine!r}. "
-            f"CPU path={cpu_path} (sizes={sorted(cpu_by_n)}), "
-            f"GPU path={gpu_path} (sizes={sorted(gpu_by_n)})."
-        )
-
-    y_cpu = [cpu_by_n[n] for n in xs]
-    y_gpu = [gpu_by_n[n] for n in xs]
 
     line_color = _machine_line_color(args.output_root, args.machine)
 
     fig, ax = plt.subplots(figsize=(8.2, 5.2))
-    ax.plot(
-        xs,
-        y_cpu,
-        color=line_color,
-        linestyle="-",
-        marker="o",
-        linewidth=2.2,
-    )
-    ax.plot(
-        xs,
-        y_gpu,
-        color=line_color,
-        linestyle="--",
-        marker="s",
-        linewidth=2.2,
-    )
+    if args.scenario == "3d_subgrid" and args.all_chunks:
+        any_data = False
+        for chunk in CHUNKS:
+            cpu_path = _json_path(args.output_root, args.machine, args.scenario, gpu=False, chunk=chunk)
+            gpu_path = _json_path(args.output_root, args.machine, args.scenario, gpu=True, chunk=chunk)
+            cpu_by_n = _load_times(cpu_path, args.scenario, "cpu")
+            gpu_by_n = _load_times(gpu_path, args.scenario, "gpu")
+            xs = sorted(set(cpu_by_n) & set(gpu_by_n))
+            if not xs:
+                continue
+            any_data = True
+            y_cpu = [cpu_by_n[n] for n in xs]
+            y_gpu = [gpu_by_n[n] for n in xs]
+            color = _lighten(line_color, CHUNK_LIGHTEN[chunk])
+            ax.plot(xs, y_cpu, color=color, linestyle="-", marker="o", linewidth=2.2)
+            ax.plot(xs, y_gpu, color=color, linestyle="--", marker="s", linewidth=2.2)
+        if not any_data:
+            raise SystemExit(
+                f"No overlapping CPU/GPU JAX data found for any chunks {CHUNKS} "
+                f"under machine={args.machine!r}."
+            )
+    else:
+        cpu_path = _json_path(args.output_root, args.machine, args.scenario, gpu=False, chunk=args.chunk)
+        gpu_path = _json_path(args.output_root, args.machine, args.scenario, gpu=True, chunk=args.chunk)
+        cpu_by_n = _load_times(cpu_path, args.scenario, "cpu")
+        gpu_by_n = _load_times(gpu_path, args.scenario, "gpu")
+
+        xs = sorted(set(cpu_by_n) & set(gpu_by_n))
+        if not xs:
+            raise SystemExit(
+                f"No overlapping JAX sizes between CPU and GPU traces for {args.machine!r}. "
+                f"CPU path={cpu_path} (sizes={sorted(cpu_by_n)}), "
+                f"GPU path={gpu_path} (sizes={sorted(gpu_by_n)})."
+            )
+        y_cpu = [cpu_by_n[n] for n in xs]
+        y_gpu = [gpu_by_n[n] for n in xs]
+        ax.plot(xs, y_cpu, color=line_color, linestyle="-", marker="o", linewidth=2.2)
+        ax.plot(xs, y_gpu, color=line_color, linestyle="--", marker="s", linewidth=2.2)
+
     ax.set_xlabel("Points per parameter axis")
     ax.set_ylabel("Cold-start wall time (s)")
-    sub = f"{args.scenario}" + (
-        "" if args.scenario == "3d_full" else f", chunk={args.chunk}"
-    )
+    if args.scenario == "3d_subgrid" and args.all_chunks:
+        sub = "3d_subgrid, all chunks"
+    else:
+        sub = f"{args.scenario}" + (
+            "" if args.scenario == "3d_full" else f", chunk={args.chunk}"
+        )
     ax.set_title(f"{args.machine}: JAX cold-start time ({sub})")
     ax.grid(axis="y", alpha=0.25)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     # Long handles so dashed vs solid is visible in the legend.
-    legend_handles = [
-        Line2D(
-            [0],
-            [0],
-            color=line_color,
-            linestyle="-",
-            linewidth=2.2,
-            marker="o",
-            markersize=7,
-            markerfacecolor=line_color,
-            markeredgecolor=line_color,
-            label="JAX CPU",
-        ),
-        Line2D(
-            [0],
-            [0],
-            color=line_color,
-            linestyle="--",
-            dash_capstyle="round",
-            linewidth=2.2,
-            marker="s",
-            markersize=6,
-            markerfacecolor=line_color,
-            markeredgecolor=line_color,
-            label="JAX GPU",
-        ),
-    ]
+    if args.scenario == "3d_subgrid" and args.all_chunks:
+        legend_handles = []
+        for chunk in CHUNKS:
+            c = _lighten(line_color, CHUNK_LIGHTEN[chunk])
+            legend_handles.extend(
+                [
+                    Line2D(
+                        [0],
+                        [0],
+                        color=c,
+                        linestyle="-",
+                        linewidth=2.2,
+                        marker="o",
+                        markersize=7,
+                        markerfacecolor=c,
+                        markeredgecolor=c,
+                        label=f"chunk={chunk} CPU",
+                    ),
+                    Line2D(
+                        [0],
+                        [0],
+                        color=c,
+                        linestyle="--",
+                        dash_capstyle="round",
+                        linewidth=2.2,
+                        marker="s",
+                        markersize=6,
+                        markerfacecolor=c,
+                        markeredgecolor=c,
+                        label=f"chunk={chunk} GPU",
+                    ),
+                ]
+            )
+    else:
+        legend_handles = [
+            Line2D(
+                [0],
+                [0],
+                color=line_color,
+                linestyle="-",
+                linewidth=2.2,
+                marker="o",
+                markersize=7,
+                markerfacecolor=line_color,
+                markeredgecolor=line_color,
+                label="JAX CPU",
+            ),
+            Line2D(
+                [0],
+                [0],
+                color=line_color,
+                linestyle="--",
+                dash_capstyle="round",
+                linewidth=2.2,
+                marker="s",
+                markersize=6,
+                markerfacecolor=line_color,
+                markeredgecolor=line_color,
+                label="JAX GPU",
+            ),
+        ]
     ax.legend(
         handles=legend_handles,
         frameon=False,
         handlelength=4.2,
         handletextpad=0.6,
+        ncol=2 if (args.scenario == "3d_subgrid" and args.all_chunks) else 1,
     )
     fig.tight_layout()
 
     out = args.output
     if out is None:
-        out = args.output_root / f"cold_start_cpu_gpu_{args.machine}.png"
+        if args.scenario == "3d_subgrid" and args.all_chunks:
+            out = args.output_root / f"cold_start_cpu_gpu_{args.machine}_subgrid_all_chunks.png"
+        else:
+            out = args.output_root / f"cold_start_cpu_gpu_{args.machine}.png"
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=220, bbox_inches="tight")
     print(out)
