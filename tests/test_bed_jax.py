@@ -76,6 +76,7 @@ def test_designer_signatures():
         "unnorm_lfunc",
         "lfunc_args",
         "mem",
+        "design_chunk_size",
         "device",
     ]
 

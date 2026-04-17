@@ -14,9 +14,26 @@ from pathlib import Path
 
 import numpy as np
 import psutil
+import pynvml  # PyPI: nvidia-ml-py
 
 ROOT = Path(__file__).resolve().parents[1]
 MIB = float(1 << 20)
+
+
+def _init_nvml() -> "pynvml.c_nvmlDevice_t":
+    """Return an NVML device handle for GPU 0."""
+    pynvml.nvmlInit()
+    return pynvml.nvmlDeviceGetHandleByIndex(0)
+
+
+def _gpu_mem_for_pid(handle: "pynvml.c_nvmlDevice_t | None", pid: int) -> float:
+    """Return GPU memory (MiB) used by *pid*, or 0.0 when *handle* is None (non-GPU run)."""
+    if handle is None:
+        return 0.0
+    for p in pynvml.nvmlDeviceGetComputeRunningProcesses(handle):
+        if p.pid == pid:
+            return (p.usedGpuMemory or 0) / MIB
+    return 0.0
 
 
 def parse_args():
@@ -226,14 +243,22 @@ def run_worker(args):
     elapsed = time.perf_counter() - t0
     if args.backend == "numpy":
         actual_device_kind = "host"
+        jax_peak_gpu_mb = 0.0
+        jax_current_gpu_mb = 0.0
     else:
-        actual_device_kind = backend["jax"].devices()[0].platform
+        dev = backend["jax"].devices()[0]
+        actual_device_kind = dev.platform
+        mem_stats = dev.memory_stats() or {}
+        jax_peak_gpu_mb = mem_stats.get("peak_bytes_in_use", 0) / MIB
+        jax_current_gpu_mb = mem_stats.get("bytes_in_use", 0) / MIB
     print(
         json.dumps(
             {
                 "status": "done",
                 "call_elapsed_s": elapsed,
                 "actual_device_kind": actual_device_kind,
+                "jax_peak_gpu_mb": jax_peak_gpu_mb,
+                "jax_current_gpu_mb": jax_current_gpu_mb,
             }
         ),
         flush=True,
@@ -286,19 +311,23 @@ def trace_case(
         bufsize=1,
     )
     ps_proc = psutil.Process(proc.pid)
+    gpu_handle = _init_nvml() if gpu else None
     t0_process = time.perf_counter()
     ready_payload = None
     t_ready = None
     pre_t_s = []
     pre_rss_mb = []
+    pre_gpu_mb = []
 
     while True:
         try:
             rss = ps_proc.memory_info().rss / MIB
         except psutil.Error:
             rss = pre_rss_mb[-1] if pre_rss_mb else 0.0
+        gpu_mem = _gpu_mem_for_pid(gpu_handle, proc.pid)
         pre_t_s.append(time.perf_counter() - t0_process)
         pre_rss_mb.append(rss)
+        pre_gpu_mb.append(gpu_mem)
 
         if proc.stdout and select.select([proc.stdout], [], [], sample_interval)[0]:
             line = proc.stdout.readline()
@@ -327,6 +356,7 @@ def trace_case(
         t0 = t0_process
         t_s = pre_t_s
         rss_mb = pre_rss_mb
+        gpu_mb = pre_gpu_mb
     else:
         t0 = time.perf_counter()
         t_s = [0.0]
@@ -334,7 +364,9 @@ def trace_case(
             rss0 = ps_proc.memory_info().rss / MIB
         except psutil.Error:
             rss0 = 0.0
+        gpu0 = _gpu_mem_for_pid(gpu_handle, proc.pid)
         rss_mb = [rss0]
+        gpu_mb = [gpu0]
 
     if proc.stdin:
         proc.stdin.write("go\n")
@@ -346,16 +378,20 @@ def trace_case(
             rss = ps_proc.memory_info().rss / MIB
         except psutil.Error:
             rss = rss_mb[-1] if rss_mb else 0.0
+        gpu_mem = _gpu_mem_for_pid(gpu_handle, proc.pid)
         t_s.append(time.perf_counter() - t0)
         rss_mb.append(rss)
+        gpu_mb.append(gpu_mem)
         time.sleep(sample_interval)
 
     try:
         rss = ps_proc.memory_info().rss / MIB
     except psutil.Error:
         rss = rss_mb[-1] if rss_mb else 0.0
+    gpu_mem = _gpu_mem_for_pid(gpu_handle, proc.pid)
     t_s.append(time.perf_counter() - t0)
     rss_mb.append(rss)
+    gpu_mb.append(gpu_mem)
 
     stdout = proc.stdout.read() if proc.stdout else ""
     stderr = proc.stderr.read() if proc.stderr else ""
@@ -382,6 +418,8 @@ def trace_case(
         "call_elapsed_s": payload["call_elapsed_s"],
         "process_elapsed_s": t_s[-1] if t_s else 0.0,
         "peak_rss_mb": max(rss_mb) if rss_mb else 0.0,
+        "peak_gpu_mb": max(gpu_mb) if gpu_mb else 0.0,
+        "jax_peak_gpu_mb": payload.get("jax_peak_gpu_mb", 0.0),
         "time_origin": time_origin,
         "ready_elapsed_s": (t_ready - t0_process) if t_ready is not None else None,
         "device_kind": payload.get(
@@ -391,6 +429,7 @@ def trace_case(
         "samples": {
             "t_s": t_s,
             "rss_mb": rss_mb,
+            "gpu_mb": gpu_mb,
         },
     }
 

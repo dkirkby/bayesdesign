@@ -54,6 +54,13 @@ def parse_args():
     )
     parser.add_argument("--output-csv", type=Path, default=Path("benchmark_results/tables/macbook_3d_chunk_sizes.csv"))
     parser.add_argument("--output-plot", type=Path, default=Path("benchmark_results/3d_chunk_size_speed_memory_macbook_blue.png"))
+    parser.add_argument("--gpu", action="store_true", help="Run JAX on GPU and omit NumPy rows.")
+    parser.add_argument(
+        "--metric",
+        choices=("rss", "gpu"),
+        default="rss",
+        help="Memory metric to plot: 'rss' for peak RSS, 'gpu' for peak GPU memory.",
+    )
     return parser.parse_args()
 
 
@@ -63,7 +70,10 @@ def main():
     rows = []
     for chunk_size in args.chunk_sizes:
         for x in X_VALUES:
-            for backend_name in ("numpy", "jax"):
+            backends = [("jax", args.gpu)]
+            if not args.gpu:
+                backends.insert(0, ("numpy", False))
+            for backend_name, use_gpu in backends:
                 try:
                     trace = trace_case(
                         backend_name,
@@ -75,14 +85,22 @@ def main():
                         51,
                         50.0,
                         design_chunk_size=chunk_size,
-                        gpu=False,
+                        gpu=use_gpu,
                     )
                 except RuntimeError as exc:
                     print(
                         f"Skipping chunk_size={chunk_size} x={x} backend={backend_name}: {exc}"
                     )
                     continue
-                backend_key = "numpy" if backend_name == "numpy" else "jax_cpu"
+                if backend_name == "numpy":
+                    backend_key = "numpy"
+                    backend_label = "NumPy"
+                elif use_gpu:
+                    backend_key = "jax_gpu"
+                    backend_label = "JAX GPU"
+                else:
+                    backend_key = "jax_cpu"
+                    backend_label = "JAX CPU"
                 rows.append(
                     {
                         "table_name": args.device_name,
@@ -92,11 +110,12 @@ def main():
                         "x_label": "Points per parameter axis",
                         "x_value": x,
                         "backend_key": backend_key,
-                        "backend_label": "NumPy" if backend_name == "numpy" else "JAX CPU",
+                        "backend_label": backend_label,
                         "device_kind": trace["device_kind"],
                         "total_elapsed_s": trace["process_elapsed_s"],
                         "call_elapsed_s": trace["call_elapsed_s"],
                         "peak_rss_mb": trace["peak_rss_mb"],
+                        "peak_gpu_mb": trace.get("peak_gpu_mb", 0.0),
                         "design_chunk_size": chunk_size,
                     }
                 )
@@ -113,24 +132,28 @@ def main():
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
 
+    mem_col = "peak_gpu_mb" if args.metric == "gpu" else "peak_rss_mb"
+    mem_label = "Peak GPU Memory (MB)" if args.metric == "gpu" else "Peak RSS (MB)"
+
     if args.plot_mode == "absolute":
+        backend_keys = [("jax_gpu", JAX_COLOR)] if args.gpu else [("numpy", NUMPY_COLOR), ("jax_cpu", JAX_COLOR)]
         for chunk_size in args.chunk_sizes:
             chunk_rows = [r for r in rows if r["design_chunk_size"] == chunk_size]
-            for backend_key, color in (("numpy", NUMPY_COLOR), ("jax_cpu", JAX_COLOR)):
+            for backend_key, color in backend_keys:
                 series = sorted(
                     [r for r in chunk_rows if r["backend_key"] == backend_key],
                     key=lambda r: r["x_value"],
                 )
                 xs = [r["x_value"] for r in series]
                 total_ys = [r["total_elapsed_s"] for r in series]
-                peak_ys = [r["peak_rss_mb"] for r in series]
+                peak_ys = [r[mem_col] for r in series]
                 linestyle = LINESTYLE_BY_CHUNK.get(chunk_size, "-")
                 axes[0].plot(xs, total_ys, color=color, linestyle=linestyle, marker="o", linewidth=2.0)
                 axes[1].plot(xs, peak_ys, color=color, linestyle=linestyle, marker="o", linewidth=2.0)
 
         axes[0].set_title("3D sine wave: explicit design chunk size")
         axes[0].set_ylabel("Cold-start total time (s)")
-        axes[1].set_ylabel("Peak RSS (MB)")
+        axes[1].set_ylabel(mem_label)
 
         backend_handles = [
             Line2D([0], [0], color=NUMPY_COLOR, linewidth=2.0, label="NumPy"),
@@ -150,11 +173,13 @@ def main():
                     continue
                 np_row = numpy_rows[0]
                 jax_row = jax_rows[0]
+                np_mem = np_row[mem_col]
+                jax_mem = jax_row[mem_col]
                 points.append(
                     (
                         x,
                         np_row["total_elapsed_s"] / jax_row["total_elapsed_s"],
-                        np_row["peak_rss_mb"] / jax_row["peak_rss_mb"],
+                        np_mem / jax_mem if jax_mem else 0.0,
                     )
                 )
             if not points:
@@ -166,9 +191,10 @@ def main():
             axes[0].plot(xs, time_ratios, color=color, linestyle="-", marker="o", linewidth=2.2)
             axes[1].plot(xs, mem_ratios, color=color, linestyle="-", marker="o", linewidth=2.2)
 
+        ratio_mem_label = "NumPy peak GPU mem / JAX peak GPU mem" if args.metric == "gpu" else "NumPy peak RSS / JAX peak RSS"
         axes[0].set_title("3D sine wave: NumPy/JAX ratios by design chunk size")
         axes[0].set_ylabel("NumPy time / JAX time")
-        axes[1].set_ylabel("NumPy peak RSS / JAX peak RSS")
+        axes[1].set_ylabel(ratio_mem_label)
 
     axes[1].set_xlabel("Points per parameter axis")
 

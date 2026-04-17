@@ -6,12 +6,34 @@ identical (or sufficiently close) results.
 
 Tolerance strategy:
 - NumPy-to-NumPy (current): rtol=1e-12 (deterministic, same platform)
-- JAX target (float64):      rtol=1e-7
+- JAX target (float64, CPU or GPU): rtol=1e-7
 - JAX target (float32):      rtol=1e-3
 """
 
+from __future__ import annotations
+
+import contextlib
+
 import numpy as np
 import pytest
+
+
+def _jax_device_kw(backend: dict) -> dict:
+    if backend.get("name") != "jax":
+        return {}
+    return {"device": backend["jax_device"]}
+
+
+@contextlib.contextmanager
+def _jax_array_scope(backend: dict):
+    """For JAX-only grid helpers (TopHat, etc.), match the backend device."""
+    if backend.get("name") != "jax":
+        yield
+        return
+    import jax
+
+    with jax.default_device(jax.devices(backend["jax_device"])[0]):
+        yield
 
 # Baseline tests consume backend-specific tolerances from conftest fixtures.
 def _rtol(case):
@@ -312,13 +334,15 @@ class TestSineWaveBaseline:
         xp = backend["xp"]
         rtol = backend["rtol"]
         atol = backend["atol"]
+        dkw = _jax_device_kw(backend)
 
-        designs = Grid(t_obs=xp.linspace(0, 5, 51))
-        features = Grid(y_obs=xp.linspace(-1.25, 1.25, 100))
+        designs = Grid(t_obs=xp.linspace(0, 5, 51), **dkw)
+        features = Grid(y_obs=xp.linspace(-1.25, 1.25, 100), **dkw)
         params = Grid(
             amplitude=xp.asarray(1.0),
             frequency=xp.linspace(0.2, 2.0, 181),
             offset=xp.asarray(0.0),
+            **dkw,
         )
 
         def unnorm_lfunc(params, features, designs, **kwargs):
@@ -334,6 +358,7 @@ class TestSineWaveBaseline:
             designs,
             unnorm_lfunc,
             lfunc_args={"sigma_y": 0.1},
+            **dkw,
         )
         prior = xp.ones(params.shape)
         prior = params.normalize(prior)
@@ -421,7 +446,8 @@ class TestGridOpsBaseline:
         xp = backend["xp"]
         rtol = backend["rtol"]
         atol = backend["atol"]
-        th = np.asarray(TopHat(xp.linspace(0.2, 2.0, 181)))
+        with _jax_array_scope(backend):
+            th = np.asarray(TopHat(xp.linspace(0.2, 2.0, 181)))
         assert th.shape == (181,)
         assert th[0] == pytest.approx(0.0055248618784530384, rel=rtol)
         assert th[-1] == pytest.approx(0.0055248618784530384, rel=rtol)
@@ -433,7 +459,8 @@ class TestGridOpsBaseline:
         xp = backend["xp"]
         rtol = backend["rtol"]
         atol = backend["atol"]
-        cb = np.asarray(CosineBump(xp.linspace(0.8, 1.2, 50)))
+        with _jax_array_scope(backend):
+            cb = np.asarray(CosineBump(xp.linspace(0.8, 1.2, 50)))
         assert cb.shape == (50,)
         assert cb[0] == pytest.approx(0.0, abs=1e-15)
         assert cb[-1] == pytest.approx(0.0, abs=1e-15)
@@ -446,7 +473,8 @@ class TestGridOpsBaseline:
         xp = backend["xp"]
         rtol = backend["rtol"]
         atol = backend["atol"]
-        g = np.asarray(Gaussian(xp.linspace(-3, 3, 101), 0, 1))
+        with _jax_array_scope(backend):
+            g = np.asarray(Gaussian(xp.linspace(-3, 3, 101), 0, 1))
         assert g.shape == (101,)
         assert g[0] == pytest.approx(0.0002665618112378019, rel=rtol)
         assert g[50] == pytest.approx(0.023995129561898122, rel=rtol)
@@ -460,7 +488,8 @@ class TestGridOpsBaseline:
         xp = backend["xp"]
         rtol = backend["rtol"]
         atol = backend["atol"]
-        grid = Grid(x=xp.linspace(0, 1, 10))
+        dkw = _jax_device_kw(backend)
+        grid = Grid(x=xp.linspace(0, 1, 10), **dkw)
         vals = xp.exp(-xp.linspace(0, 1, 10)).reshape(grid.shape)
         normed = vals
         normed = np.asarray(grid.normalize(normed))
@@ -479,7 +508,8 @@ class TestGridOpsBaseline:
         Grid = backend["Grid"]
         xp = backend["xp"]
         rtol = backend["rtol"]
-        grid = Grid(x=xp.arange(3), y=xp.arange(4))
+        dkw = _jax_device_kw(backend)
+        grid = Grid(x=xp.arange(3), y=xp.arange(4), **dkw)
         vals = ((grid.x + 1) * (grid.y + 1)).astype(float)
         partial_x = np.asarray(grid.sum(vals, axis_names=("x",)))
         np.testing.assert_allclose(partial_x, [6.0, 12.0, 18.0, 24.0], rtol=rtol)

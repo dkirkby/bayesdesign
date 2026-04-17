@@ -93,6 +93,7 @@ def main():
                         "total_elapsed_s": trace["process_elapsed_s"],
                         "call_elapsed_s": trace["call_elapsed_s"],
                         "peak_rss_mb": trace["peak_rss_mb"],
+                        "peak_gpu_mb": trace.get("peak_gpu_mb", 0.0),
                         "design_points_1d": args.design_points_1d,
                         "subgrid_mem_mb": mem_value,
                     }
