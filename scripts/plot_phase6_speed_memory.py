@@ -42,6 +42,12 @@ def parse_args():
         help="Plot only one curve family as a 2-row figure.",
     )
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--metric",
+        choices=("rss", "gpu"),
+        default="rss",
+        help="Memory metric to plot: 'rss' for peak RSS, 'gpu' for peak GPU memory.",
+    )
     return parser.parse_args()
 
 
@@ -52,6 +58,7 @@ def _load_rows(path: Path) -> list[dict]:
         row["x_value"] = float(row["x_value"])
         row["total_elapsed_s"] = float(row["total_elapsed_s"])
         row["peak_rss_mb"] = float(row["peak_rss_mb"])
+        row["peak_gpu_mb"] = float(row.get("peak_gpu_mb", 0.0))
     return rows
 
 
@@ -95,13 +102,16 @@ def main():
         for row in rows:
             grouped[(path, row["curve_family"], row["backend_key"])].append(row)
 
+    mem_col = "peak_gpu_mb" if args.metric == "gpu" else "peak_rss_mb"
+    mem_label = "Peak GPU Memory (MB)" if args.metric == "gpu" else "Peak RSS (MB)"
+
     for (path, curve_family, backend_key), rows in grouped.items():
         if args.curve_family and curve_family != args.curve_family:
             continue
         rows = sorted(rows, key=lambda r: r["x_value"])
         xs = [r["x_value"] for r in rows]
         time_ys = [r["total_elapsed_s"] for r in rows]
-        mem_ys = [r["peak_rss_mb"] for r in rows]
+        mem_ys = [r[mem_col] for r in rows]
         color = _color_for(path, backend_key, args.csv_paths)
         linestyle = linestyle_by_csv[path]
         ax_t, ax_m = plot_axes[curve_family]
@@ -113,19 +123,19 @@ def main():
         ax_t, ax_m = plot_axes["1d"]
         ax_t.set_title(f"1D sine wave: {title_suffix}")
         ax_t.set_ylabel("Cold-start total time (s)")
-        ax_m.set_ylabel("Peak RSS (MB)")
+        ax_m.set_ylabel(mem_label)
         ax_m.set_xlabel("Frequency grid points")
     elif args.curve_family == "3d":
         ax_t, ax_m = plot_axes["3d"]
         ax_t.set_title(f"3D sine wave: {title_suffix}")
         ax_t.set_ylabel("Cold-start total time (s)")
-        ax_m.set_ylabel("Peak RSS (MB)")
+        ax_m.set_ylabel(mem_label)
         ax_m.set_xlabel("Points per parameter axis")
     else:
         ax_t1.set_title(f"1D sine wave: {title_suffix}")
         ax_t3.set_title(f"3D sine wave: {title_suffix}")
         ax_t1.set_ylabel("Cold-start total time (s)")
-        ax_m1.set_ylabel("Peak RSS (MB)")
+        ax_m1.set_ylabel(mem_label)
         ax_t1.set_xlabel("Frequency grid points")
         ax_m1.set_xlabel("Frequency grid points")
         ax_t3.set_xlabel("Points per parameter axis")

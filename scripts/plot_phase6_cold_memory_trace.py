@@ -39,9 +39,9 @@ def parse_args():
     )
     parser.add_argument(
         "--metric",
-        choices=("rss", "uss"),
+        choices=("rss", "uss", "gpu"),
         default="rss",
-        help="Memory metric to plot. Falls back to RSS if USS samples are unavailable.",
+        help="Memory metric to plot. Falls back to RSS if USS/GPU samples are unavailable.",
     )
     return parser.parse_args()
 
@@ -94,8 +94,15 @@ def main():
             }.get(backend_key, trace["label"])
             backend_handles[(path, backend_key)] = (color, backend_label)
             expected = trace.get("expected_schedule")
-            sample_key = "uss_mb" if args.metric == "uss" and "uss_mb" in trace["samples"] else "rss_mb"
-            metric_name = "USS" if sample_key == "uss_mb" else "RSS"
+            if args.metric == "gpu" and "gpu_mb" in trace["samples"]:
+                sample_key = "gpu_mb"
+                metric_name = "GPU Memory"
+            elif args.metric == "uss" and "uss_mb" in trace["samples"]:
+                sample_key = "uss_mb"
+                metric_name = "USS"
+            else:
+                sample_key = "rss_mb"
+                metric_name = "RSS"
             ready_elapsed = trace.get("ready_elapsed_s")
             if ready_elapsed is None and trace.get("expected_offset_s") is not None:
                 ready_elapsed = float(trace["expected_offset_s"])

@@ -632,72 +632,79 @@ class ExperimentDesigner:
         return cache[key]
 
     def calculateEIG(self, prior, debug=False):
+        # Keep all temporaries and JIT outputs on ``self.device`` even when the
+        # process default backend is GPU (e.g. ``JAX_PLATFORM_NAME=gpu``) but the
+        # designer was constructed with ``device="cpu"``).
         with jax.default_device(self.device):
             self.prior = jnp.asarray(prior)
             self.EIG = jnp.full_like(self.EIG, jnp.nan)
-        prior_norm = self.parameters.sum(self.prior)
-        if not bool(jnp.allclose(prior_norm, 1.0)):
-            raise ValueError("Prior probabilities must sum to 1")
+            prior_norm = self.parameters.sum(self.prior)
+            if not bool(jnp.allclose(prior_norm, 1.0)):
+                raise ValueError("Prior probabilities must sum to 1")
 
-        # Calculate prior entropy in bits (careful with x log x = 0 for x=0).
-        log2prior = jnp.where(self.prior > 0, jnp.log2(self.prior), 0)
-        self.H0 = float(-self.parameters.sum(self.prior * log2prior))
-        h0 = jnp.asarray(self.H0, dtype=self.prior.dtype)
-        total_designs = int(math.prod(self.designs.shape))
+            # Calculate prior entropy in bits (careful with x log x = 0 for x=0).
+            log2prior = jnp.where(self.prior > 0, jnp.log2(self.prior), 0)
+            self.H0 = float(-self.parameters.sum(self.prior * log2prior))
+            h0 = jnp.asarray(self.H0, dtype=self.prior.dtype)
+            total_designs = int(math.prod(self.designs.shape))
 
-        if self.num_subgrids > 1 and not debug:
-            self.subgrid_shape = self._get_chunk_scan_setup()["chunk_shape"]
-            marginal, ig, eig_flat = self._get_chunked_eig_kernel()(self.prior, h0)
-            self.marginal = marginal
-            self.IG = ig
+            if self.num_subgrids > 1 and not debug:
+                self.subgrid_shape = self._get_chunk_scan_setup()["chunk_shape"]
+                marginal, ig, eig_flat = self._get_chunked_eig_kernel()(self.prior, h0)
+                self.marginal = marginal
+                self.IG = ig
+                self.EIG = jnp.reshape(eig_flat, self.designs.shape)
+                self._initialized = True
+                return self.designs.getmax(self.EIG)
+
+            eig_flat = jnp.full((total_designs,), jnp.nan, dtype=self.prior.dtype)
+
+            for i, (s, _) in enumerate(self.designs.subgrid(self.design_subgrid)):
+                chunk_size = int(math.prod(s.shape))
+                if i == 0:
+                    # Store first subgrid likelihood shape for describe().
+                    self.subgrid_shape = s.shape
+
+                with GridStack(self.features, s, self.parameters):
+                    sub_likelihood = self.likelihood_func(s)
+                    if debug:
+                        assert bool(
+                            jnp.allclose(self.features.sum(sub_likelihood), 1.0)
+                        ), "likelihood normalization failed"
+
+                    kernel = self._get_eig_kernel(self.subgrid_shape)
+                    sub_likelihood = self._pad_subgrid_values(
+                        sub_likelihood, s.shape, self.subgrid_shape
+                    )
+                    marginal, ig, eig = kernel(sub_likelihood, self.prior, h0)
+                    if i == 0:
+                        # Store first subgrid arrays for describe().
+                        self.marginal = marginal
+                        self.IG = ig
+
+                    if debug:
+                        marginal_ref = self.parameters.sum(sub_likelihood * self.prior)
+                        assert bool(
+                            jnp.allclose(marginal_ref, marginal)
+                        ), "marginal check failed"
+
+                        posterior = self.parameters.normalize(
+                            sub_likelihood * self.prior
+                        )
+                        log2posterior = jnp.where(posterior > 0, jnp.log2(posterior), 0)
+                        ig_ref = self.H0 + self.parameters.sum(
+                            posterior * log2posterior
+                        )
+                        ig_ref = jnp.where(marginal_ref > 0, ig_ref, 0)
+                        assert bool(jnp.allclose(ig_ref, ig)), "IG check failed"
+
+                    start = i * self.design_subgrid
+                    stop = start + chunk_size
+                    eig_flat = eig_flat.at[start:stop].set(jnp.ravel(eig)[:chunk_size])
+
             self.EIG = jnp.reshape(eig_flat, self.designs.shape)
             self._initialized = True
             return self.designs.getmax(self.EIG)
-
-        eig_flat = jnp.full((total_designs,), jnp.nan, dtype=self.prior.dtype)
-
-        for i, (s, _) in enumerate(self.designs.subgrid(self.design_subgrid)):
-            chunk_size = int(math.prod(s.shape))
-            if i == 0:
-                # Store first subgrid likelihood shape for describe().
-                self.subgrid_shape = s.shape
-
-            with GridStack(self.features, s, self.parameters):
-                sub_likelihood = self.likelihood_func(s)
-                if debug:
-                    assert bool(
-                        jnp.allclose(self.features.sum(sub_likelihood), 1.0)
-                    ), "likelihood normalization failed"
-
-                kernel = self._get_eig_kernel(self.subgrid_shape)
-                sub_likelihood = self._pad_subgrid_values(
-                    sub_likelihood, s.shape, self.subgrid_shape
-                )
-                marginal, ig, eig = kernel(sub_likelihood, self.prior, h0)
-                if i == 0:
-                    # Store first subgrid arrays for describe().
-                    self.marginal = marginal
-                    self.IG = ig
-
-                if debug:
-                    marginal_ref = self.parameters.sum(sub_likelihood * self.prior)
-                    assert bool(
-                        jnp.allclose(marginal_ref, marginal)
-                    ), "marginal check failed"
-
-                    posterior = self.parameters.normalize(sub_likelihood * self.prior)
-                    log2posterior = jnp.where(posterior > 0, jnp.log2(posterior), 0)
-                    ig_ref = self.H0 + self.parameters.sum(posterior * log2posterior)
-                    ig_ref = jnp.where(marginal_ref > 0, ig_ref, 0)
-                    assert bool(jnp.allclose(ig_ref, ig)), "IG check failed"
-
-                start = i * self.design_subgrid
-                stop = start + chunk_size
-                eig_flat = eig_flat.at[start:stop].set(jnp.ravel(eig)[:chunk_size])
-
-        self.EIG = jnp.reshape(eig_flat, self.designs.shape)
-        self._initialized = True
-        return self.designs.getmax(self.EIG)
 
     def likelihood_func(self, s):
         likelihood = self.unnorm_lfunc(
@@ -729,39 +736,43 @@ class ExperimentDesigner:
         _, group_ids, num_segments, interest_shape = self._get_marginal_grouping(
             nuisance_axes
         )
-        param_size = int(math.prod(self.parameters.shape))
-        param_weights = self._param_weights_flat
-        prior_interest = _segment_sum(
-            jnp.reshape(self.prior, (param_size,)) * param_weights,
-            group_ids,
-            num_segments=num_segments,
-        ).reshape(interest_shape)
-        log2prior = jnp.where(prior_interest > 0, jnp.log2(prior_interest), 0)
-        h0 = -jnp.sum(prior_interest * log2prior)
-
-        if self.num_subgrids > 1:
-            eig_flat = self._get_chunked_marginal_eig_kernel(nuisance_axes)(
-                self.prior, h0
-            )
-            return jnp.reshape(eig_flat, self.designs.shape)
-
         with jax.default_device(self.device):
-            eig_full = jnp.full_like(self.EIG, jnp.nan)
-        eig_flat = jnp.full((int(math.prod(self.designs.shape)),), jnp.nan, dtype=self.prior.dtype)
-        for i, (s, _) in enumerate(self.designs.subgrid(self.design_subgrid)):
-            chunk_size = int(math.prod(s.shape))
-            with GridStack(self.features, s, self.parameters):
-                sub_likelihood = self.likelihood_func(s)
-                kernel = self._get_marginal_eig_kernel(self.subgrid_shape, nuisance_axes)
-                sub_likelihood = self._pad_subgrid_values(
-                    sub_likelihood, s.shape, self.subgrid_shape
+            param_size = int(math.prod(self.parameters.shape))
+            param_weights = self._param_weights_flat
+            prior_interest = _segment_sum(
+                jnp.reshape(self.prior, (param_size,)) * param_weights,
+                group_ids,
+                num_segments=num_segments,
+            ).reshape(interest_shape)
+            log2prior = jnp.where(prior_interest > 0, jnp.log2(prior_interest), 0)
+            h0 = -jnp.sum(prior_interest * log2prior)
+
+            if self.num_subgrids > 1:
+                eig_flat = self._get_chunked_marginal_eig_kernel(nuisance_axes)(
+                    self.prior, h0
                 )
-                eig = kernel(sub_likelihood, self.prior, h0)
-                start = i * self.design_subgrid
-                stop = start + chunk_size
-                eig_flat = eig_flat.at[start:stop].set(jnp.ravel(eig)[:chunk_size])
-        eig_full = jnp.reshape(eig_flat, self.designs.shape)
-        return eig_full
+                return jnp.reshape(eig_flat, self.designs.shape)
+
+            eig_flat = jnp.full(
+                (int(math.prod(self.designs.shape)),),
+                jnp.nan,
+                dtype=self.prior.dtype,
+            )
+            for i, (s, _) in enumerate(self.designs.subgrid(self.design_subgrid)):
+                chunk_size = int(math.prod(s.shape))
+                with GridStack(self.features, s, self.parameters):
+                    sub_likelihood = self.likelihood_func(s)
+                    kernel = self._get_marginal_eig_kernel(
+                        self.subgrid_shape, nuisance_axes
+                    )
+                    sub_likelihood = self._pad_subgrid_values(
+                        sub_likelihood, s.shape, self.subgrid_shape
+                    )
+                    eig = kernel(sub_likelihood, self.prior, h0)
+                    start = i * self.design_subgrid
+                    stop = start + chunk_size
+                    eig_flat = eig_flat.at[start:stop].set(jnp.ravel(eig)[:chunk_size])
+            return jnp.reshape(eig_flat, self.designs.shape)
 
     def describe(self):
         if not self._initialized:

@@ -41,6 +41,30 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-root", type=Path, default=Path("benchmark_results"))
     parser.add_argument("--sample-interval", type=float, default=0.01)
     parser.add_argument("--skip-collect", action="store_true", help="Only regenerate plots/CSVs from existing JSON.")
+    parser.add_argument(
+        "--device",
+        choices=("cpu", "gpu"),
+        default="cpu",
+        help="Device to run JAX on. 'gpu' skips NumPy traces and uses GPU memory instead of RSS.",
+    )
+    parser.add_argument(
+        "--jax-preallocate",
+        choices=("true", "false"),
+        default=None,
+        help="Override XLA_PYTHON_CLIENT_PREALLOCATE for JAX traces.",
+    )
+    parser.add_argument(
+        "--jax-allocator",
+        choices=("default", "platform"),
+        default=None,
+        help="Set XLA_PYTHON_CLIENT_ALLOCATOR for JAX traces.",
+    )
+    parser.add_argument(
+        "--jax-mem-fraction",
+        type=float,
+        default=None,
+        help="Set XLA_PYTHON_CLIENT_MEM_FRACTION (0,1] for JAX traces.",
+    )
     return parser.parse_args()
 
 
@@ -74,12 +98,14 @@ def machine_dir(root: Path, machine: str) -> Path:
     return root / "machines" / machine
 
 
-def machine_full_json(root: Path, machine: str) -> Path:
-    return machine_dir(root, machine) / "cold_memory_trace_3d_full_strict_cold.json"
+def machine_full_json(root: Path, machine: str, device: str = "cpu") -> Path:
+    suffix = f"_{device}" if device != "cpu" else ""
+    return machine_dir(root, machine) / f"cold_memory_trace_3d_full_strict_cold{suffix}.json"
 
 
-def machine_chunk_json(root: Path, machine: str, chunk: int) -> Path:
-    return machine_dir(root, machine) / f"cold_memory_trace_3d_subgrid_chunk{chunk}_strict_cold.json"
+def machine_chunk_json(root: Path, machine: str, chunk: int, device: str = "cpu") -> Path:
+    suffix = f"_{device}" if device != "cpu" else ""
+    return machine_dir(root, machine) / f"cold_memory_trace_3d_subgrid_chunk{chunk}_strict_cold{suffix}.json"
 
 
 def ensure_legacy_macbook_seed(root: Path, styles: dict[str, str]) -> None:
@@ -101,91 +127,127 @@ def ensure_legacy_macbook_seed(root: Path, styles: dict[str, str]) -> None:
     styles.setdefault("macbook", "tab:blue")
 
 
-def collect_machine(root: Path, machine: str, sample_interval: float) -> None:
-    # Enforce CPU paths for JAX traces.
-    os.environ["JAX_PLATFORM_NAME"] = "cpu"
-    os.environ["JAX_PLATFORMS"] = "cpu"
-    os.environ["CUDA_VISIBLE_DEVICES"] = ""
+def collect_machine(
+    root: Path,
+    machine: str,
+    sample_interval: float,
+    device: str = "cpu",
+    jax_preallocate: str | None = None,
+    jax_allocator: str | None = None,
+    jax_mem_fraction: float | None = None,
+) -> None:
+    use_gpu = device == "gpu"
+    if not use_gpu:
+        # Enforce CPU paths for JAX traces.
+        os.environ["JAX_PLATFORM_NAME"] = "cpu"
+        os.environ["JAX_PLATFORMS"] = "cpu"
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""
+    else:
+        # Clear any CPU-forcing env vars so JAX can find the GPU.
+        os.environ.pop("JAX_PLATFORM_NAME", None)
+        os.environ.pop("JAX_PLATFORMS", None)
+        # CPU path sets CUDA_VISIBLE_DEVICES="". Remove that, then default to one
+        # physical GPU: if every GPU stays visible, JAX/XLA often touches all of
+        # them (small contexts on non-primary devices) even when compute is on :0.
+        if os.environ.get("CUDA_VISIBLE_DEVICES") == "":
+            os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+        os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
 
     mdir = machine_dir(root, machine)
     mdir.mkdir(parents=True, exist_ok=True)
 
     full_traces = []
     for p in POINTS:
-        full_traces.append(
-            trace_case(
-                "numpy",
-                "3d_full",
-                p,
-                "NumPy full-grid",
-                sample_interval,
-                "process",
-                51,
-                50.0,
-                design_chunk_size=None,
-                gpu=False,
+        if not use_gpu:
+            full_traces.append(
+                trace_case(
+                    "numpy",
+                    "3d_full",
+                    p,
+                    "NumPy full-grid",
+                    sample_interval,
+                    "process",
+                    51,
+                    50.0,
+                    design_chunk_size=None,
+                    gpu=False,
+                )
             )
-        )
-        full_traces.append(
-            trace_case(
-                "jax",
-                "3d_full",
-                p,
-                "JAX full-grid",
-                sample_interval,
-                "process",
-                51,
-                50.0,
-                design_chunk_size=None,
-                gpu=False,
+        try:
+            full_traces.append(
+                trace_case(
+                    "jax",
+                    "3d_full",
+                    p,
+                    "JAX full-grid",
+                    sample_interval,
+                    "process",
+                    51,
+                    50.0,
+                    design_chunk_size=None,
+                    gpu=use_gpu,
+                    jax_preallocate=jax_preallocate,
+                    jax_allocator=jax_allocator,
+                    jax_mem_fraction=jax_mem_fraction,
+                )
             )
-        )
-    full_out = machine_full_json(root, machine)
+        except RuntimeError as exc:
+            print(f"Skipping 3d_full p={p} jax: {exc}")
+    full_out = machine_full_json(root, machine, device=device)
     full_out.write_text(json.dumps(full_traces, indent=2), encoding="utf-8")
-    for t in full_traces:
-        if t["backend"] == "jax" and t.get("device_kind") != "cpu":
-            raise RuntimeError(f"Expected CPU JAX trace, got device_kind={t.get('device_kind')}")
+    if not use_gpu:
+        for t in full_traces:
+            if t["backend"] == "jax" and t.get("device_kind") != "cpu":
+                raise RuntimeError(f"Expected CPU JAX trace, got device_kind={t.get('device_kind')}")
 
     for c in CHUNKS:
         traces = []
         for p in POINTS:
-            traces.append(
-                trace_case(
-                    "numpy",
-                    "3d_subgrid",
-                    p,
-                    f"NumPy chunk{c}",
-                    sample_interval,
-                    "process",
-                    51,
-                    50.0,
-                    design_chunk_size=c,
-                    gpu=False,
+            if not use_gpu:
+                traces.append(
+                    trace_case(
+                        "numpy",
+                        "3d_subgrid",
+                        p,
+                        f"NumPy chunk{c}",
+                        sample_interval,
+                        "process",
+                        51,
+                        50.0,
+                        design_chunk_size=c,
+                        gpu=False,
+                    )
                 )
-            )
-            traces.append(
-                trace_case(
-                    "jax",
-                    "3d_subgrid",
-                    p,
-                    f"JAX chunk{c}",
-                    sample_interval,
-                    "process",
-                    51,
-                    50.0,
-                    design_chunk_size=c,
-                    gpu=False,
+            try:
+                traces.append(
+                    trace_case(
+                        "jax",
+                        "3d_subgrid",
+                        p,
+                        f"JAX chunk{c}",
+                        sample_interval,
+                        "process",
+                        51,
+                        50.0,
+                        design_chunk_size=c,
+                        gpu=use_gpu,
+                        jax_preallocate=jax_preallocate,
+                        jax_allocator=jax_allocator,
+                        jax_mem_fraction=jax_mem_fraction,
+                    )
                 )
-            )
-        chunk_out = machine_chunk_json(root, machine, c)
+            except RuntimeError as exc:
+                print(f"Skipping 3d_subgrid chunk={c} p={p} jax: {exc}")
+        chunk_out = machine_chunk_json(root, machine, c, device=device)
         chunk_out.write_text(json.dumps(traces, indent=2), encoding="utf-8")
-        for t in traces:
-            if t["backend"] == "jax" and t.get("device_kind") != "cpu":
-                raise RuntimeError(f"Expected CPU JAX trace, got device_kind={t.get('device_kind')}")
+        if not use_gpu:
+            for t in traces:
+                if t["backend"] == "jax" and t.get("device_kind") != "cpu":
+                    raise RuntimeError(f"Expected CPU JAX trace, got device_kind={t.get('device_kind')}")
 
 
-def load_machine_traces(root: Path, machine: str) -> dict:
-    full_path = machine_full_json(root, machine)
+def load_machine_traces(root: Path, machine: str, device: str = "cpu") -> dict:
+    full_path = machine_full_json(root, machine, device=device)
     if not full_path.exists():
         raise FileNotFoundError(str(full_path))
     out = {
@@ -193,13 +255,15 @@ def load_machine_traces(root: Path, machine: str) -> dict:
         "chunks": {},
     }
     for c in CHUNKS:
-        p = machine_chunk_json(root, machine, c)
+        p = machine_chunk_json(root, machine, c, device=device)
         if p.exists():
             out["chunks"][c] = json.loads(p.read_text(encoding="utf-8"))
     return out
 
 
-def ratios_from_traces(traces: list[dict], scenario: str) -> dict[int, tuple[float, float]]:
+def ratios_from_traces(
+    traces: list[dict], scenario: str, mem_key: str = "peak_rss_mb",
+) -> dict[int, tuple[float, float]]:
     by_size: dict[int, dict[str, dict]] = {}
     for t in traces:
         if t.get("scenario") != scenario:
@@ -212,45 +276,110 @@ def ratios_from_traces(traces: list[dict], scenario: str) -> dict[int, tuple[flo
             continue
         n = rec["numpy"]
         j = rec["jax"]
+        n_mem = float(n.get(mem_key, n["peak_rss_mb"]))
+        j_mem = float(j.get(mem_key, j["peak_rss_mb"]))
         out[p] = (
             float(n["process_elapsed_s"]) / float(j["process_elapsed_s"]),
-            float(n["peak_rss_mb"]) / float(j["peak_rss_mb"]),
+            n_mem / j_mem if j_mem else 0.0,
         )
     return out
 
 
-def write_machine_ratio_csvs(root: Path, machine: str, traces: dict) -> None:
+def absolutes_from_traces(
+    traces: list[dict], scenario: str, mem_key: str = "jax_peak_gpu_mb",
+) -> dict[int, tuple[float, float]]:
+    """Extract absolute (time, memory) for JAX traces by grid size."""
+    out: dict[int, tuple[float, float]] = {}
+    for t in traces:
+        if t.get("scenario") != scenario or t.get("backend") != "jax":
+            continue
+        mem = float(t.get(mem_key, 0.0))
+        out[int(t["size"])] = (float(t["process_elapsed_s"]), mem)
+    return out
+
+
+def write_machine_csvs(
+    root: Path, machine: str, traces: dict, mem_key: str = "peak_rss_mb",
+    use_gpu: bool = False,
+) -> None:
     mdir = machine_dir(root, machine)
     mdir.mkdir(parents=True, exist_ok=True)
 
-    full_ratio = ratios_from_traces(traces["full"], "3d_full")
-    with (mdir / "full_grid_3d_ratio.csv").open("w", newline="", encoding="utf-8") as f:
-        w = csv.writer(f)
-        w.writerow(["points_per_axis", "numpy_over_jax_time", "numpy_over_jax_peak_rss"])
-        for p in POINTS:
-            if p in full_ratio:
-                t, m = full_ratio[p]
-                w.writerow([p, f"{t:.10f}", f"{m:.10f}"])
-
-    with (mdir / "subgrid_chunk_ratio.csv").open("w", newline="", encoding="utf-8") as f:
-        w = csv.writer(f)
-        w.writerow(["design_chunk_size", "points_per_axis", "numpy_over_jax_time", "numpy_over_jax_peak_rss"])
-        for c in CHUNKS:
-            if c not in traces["chunks"]:
-                continue
-            ratio = ratios_from_traces(traces["chunks"][c], "3d_subgrid")
+    if use_gpu:
+        # Write absolute JAX-only CSVs (no ratios possible without NumPy).
+        # For GPU mode we use jax_peak_gpu_mb by default (active JAX-reported peak),
+        # which is less sensitive to allocator reservation behavior than NVML PID peak.
+        with (mdir / "full_grid_3d_absolute.csv").open("w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["points_per_axis", "total_elapsed_s", "jax_peak_gpu_mb"])
+            vals = absolutes_from_traces(traces["full"], "3d_full", mem_key=mem_key)
             for p in POINTS:
-                if p in ratio:
-                    t, m = ratio[p]
-                    w.writerow([c, p, f"{t:.10f}", f"{m:.10f}"])
+                if p in vals:
+                    t, m = vals[p]
+                    w.writerow([p, f"{t:.10f}", f"{m:.10f}"])
+
+        with (mdir / "subgrid_chunk_absolute.csv").open("w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["design_chunk_size", "points_per_axis", "total_elapsed_s", "jax_peak_gpu_mb"])
+            for c in CHUNKS:
+                if c not in traces["chunks"]:
+                    continue
+                vals = absolutes_from_traces(traces["chunks"][c], "3d_subgrid", mem_key=mem_key)
+                for p in POINTS:
+                    if p in vals:
+                        t, m = vals[p]
+                        w.writerow([c, p, f"{t:.10f}", f"{m:.10f}"])
+    else:
+        # Write NumPy/JAX ratio CSVs.
+        with (mdir / "full_grid_3d_ratio.csv").open("w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["points_per_axis", "numpy_over_jax_time", "numpy_over_jax_peak_rss"])
+            full_ratio = ratios_from_traces(traces["full"], "3d_full", mem_key=mem_key)
+            for p in POINTS:
+                if p in full_ratio:
+                    t, m = full_ratio[p]
+                    w.writerow([p, f"{t:.10f}", f"{m:.10f}"])
+
+        with (mdir / "subgrid_chunk_ratio.csv").open("w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["design_chunk_size", "points_per_axis", "numpy_over_jax_time", "numpy_over_jax_peak_rss"])
+            for c in CHUNKS:
+                if c not in traces["chunks"]:
+                    continue
+                ratio = ratios_from_traces(traces["chunks"][c], "3d_subgrid", mem_key=mem_key)
+                for p in POINTS:
+                    if p in ratio:
+                        t, m = ratio[p]
+                        w.writerow([c, p, f"{t:.10f}", f"{m:.10f}"])
 
 
-def to_ready_relative(trace: dict) -> tuple[np.ndarray, np.ndarray]:
+def to_ready_relative(
+    trace: dict, sample_key: str = "rss_mb",
+) -> tuple[np.ndarray, np.ndarray]:
     t = np.asarray(trace["samples"]["t_s"], dtype=float)
-    r = np.asarray(trace["samples"]["rss_mb"], dtype=float)
+    if sample_key == "jax_gpu_mb":
+        r_vals = trace["samples"].get("jax_gpu_mb", trace["samples"].get("gpu_mb", trace["samples"]["rss_mb"]))
+    else:
+        r_vals = trace["samples"].get(sample_key, trace["samples"]["rss_mb"])
+    r = np.asarray(r_vals, dtype=float)
     t_ready = float(trace["ready_elapsed_s"])
     r_ready = np.interp(t_ready, t, r)
     return t - t_ready, r - r_ready
+
+
+def gpu_abs_series_from_alloc_baseline(
+    trace: dict,
+    sample_key: str = "gpu_mb",
+) -> tuple[np.ndarray, np.ndarray]:
+    """Absolute GPU MiB vs time relative to worker ready (``t = 0`` at ready)."""
+    t = np.asarray(trace["samples"]["t_s"], dtype=float)
+    if sample_key == "jax_gpu_mb":
+        r_vals = trace["samples"].get("jax_gpu_mb", trace["samples"].get("gpu_mb", trace["samples"]["rss_mb"]))
+    else:
+        r_vals = trace["samples"].get(sample_key, trace["samples"]["rss_mb"])
+    r = np.asarray(r_vals, dtype=float)
+    t_ready = float(trace["ready_elapsed_s"])
+    return t - t_ready, r
 
 
 def pick_trace(traces: list[dict], scenario: str, size: int, backend: str) -> dict | None:
@@ -260,27 +389,49 @@ def pick_trace(traces: list[dict], scenario: str, size: int, backend: str) -> di
     return None
 
 
-def plot_full_ratio(root: Path, all_data: dict[str, dict], styles: dict[str, str]) -> Path:
-    out = root / "3d_full_grid_ratio_all_machines.png"
+def plot_full_grid(
+    root: Path, all_data: dict[str, dict], styles: dict[str, str],
+    mem_key: str = "peak_rss_mb", use_gpu: bool = False,
+) -> Path:
+    suffix = "_gpu" if use_gpu else ""
+    out = root / f"3d_full_grid_ratio_all_machines{suffix}.png"
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8.6, 8.8), sharex=True)
-    for machine, data in sorted(all_data.items()):
-        ratio = ratios_from_traces(data["full"], "3d_full")
-        xs = [p for p in POINTS if p in ratio]
-        if not xs:
-            continue
-        t = [ratio[p][0] for p in xs]
-        m = [ratio[p][1] for p in xs]
-        color = styles[machine]
-        ax1.plot(xs, t, color=color, marker="o", linewidth=2.2, label=machine)
-        ax2.plot(xs, m, color=color, marker="o", linewidth=2.2, label=machine)
+
+    if use_gpu:
+        for machine, data in sorted(all_data.items()):
+            vals = absolutes_from_traces(data["full"], "3d_full", mem_key=mem_key)
+            xs = [p for p in POINTS if p in vals]
+            if not xs:
+                continue
+            t = [vals[p][0] for p in xs]
+            m = [vals[p][1] for p in xs]
+            color = styles[machine]
+            ax1.plot(xs, t, color=color, marker="o", linewidth=2.2, label=machine)
+            ax2.plot(xs, m, color=color, marker="o", linewidth=2.2, label=machine)
+        ax1.set_title("3D sine wave: full-grid JAX GPU")
+        ax1.set_ylabel("Cold-start total time (s)")
+        ax2.set_ylabel("Peak GPU Memory (MB)")
+    else:
+        for machine, data in sorted(all_data.items()):
+            ratio = ratios_from_traces(data["full"], "3d_full", mem_key=mem_key)
+            xs = [p for p in POINTS if p in ratio]
+            if not xs:
+                continue
+            t = [ratio[p][0] for p in xs]
+            m = [ratio[p][1] for p in xs]
+            color = styles[machine]
+            ax1.plot(xs, t, color=color, marker="o", linewidth=2.2, label=machine)
+            ax2.plot(xs, m, color=color, marker="o", linewidth=2.2, label=machine)
+        for ax in (ax1, ax2):
+            ax.axhline(1.0, color="0.55", linestyle="--", linewidth=1.3)
+        ax1.set_title("3D sine wave: full-grid NumPy/JAX ratios")
+        ax1.set_ylabel("NumPy time / JAX time")
+        ax2.set_ylabel("NumPy peak RSS / JAX peak RSS")
+
     for ax in (ax1, ax2):
-        ax.axhline(1.0, color="0.55", linestyle="--", linewidth=1.3)
         ax.grid(axis="y", alpha=0.25)
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
-    ax1.set_title("3D sine wave: full-grid NumPy/JAX ratios")
-    ax1.set_ylabel("NumPy time / JAX time")
-    ax2.set_ylabel("NumPy peak RSS / JAX peak RSS")
     ax2.set_xlabel("Points per parameter axis")
     ax1.set_xlim(10, 80)
     ax2.set_xlim(10, 80)
@@ -291,33 +442,54 @@ def plot_full_ratio(root: Path, all_data: dict[str, dict], styles: dict[str, str
     return out
 
 
-def plot_subgrid_chunk_ratio(root: Path, all_data: dict[str, dict], styles: dict[str, str]) -> Path:
-    out = root / "3d_subgrid_chunk_ratio_all_machines.png"
+def plot_subgrid_chunk(
+    root: Path, all_data: dict[str, dict], styles: dict[str, str],
+    mem_key: str = "peak_rss_mb", use_gpu: bool = False,
+) -> Path:
+    suffix = "_gpu" if use_gpu else ""
+    out = root / f"3d_subgrid_chunk_ratio_all_machines{suffix}.png"
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(9.4, 9.0), sharex=True)
+
     for machine, data in sorted(all_data.items()):
         base = styles[machine]
         for c in CHUNKS:
             traces = data["chunks"].get(c)
             if not traces:
                 continue
-            ratio = ratios_from_traces(traces, "3d_subgrid")
-            xs = [p for p in POINTS if p in ratio]
-            if not xs:
-                continue
-            t = [ratio[p][0] for p in xs]
-            m = [ratio[p][1] for p in xs]
             color = lighten(base, CHUNK_LIGHTEN[c])
             label = f"{machine} chunk={c}"
+            if use_gpu:
+                vals = absolutes_from_traces(traces, "3d_subgrid", mem_key=mem_key)
+                xs = [p for p in POINTS if p in vals]
+                if not xs:
+                    continue
+                t = [vals[p][0] for p in xs]
+                m = [vals[p][1] for p in xs]
+            else:
+                ratio = ratios_from_traces(traces, "3d_subgrid", mem_key=mem_key)
+                xs = [p for p in POINTS if p in ratio]
+                if not xs:
+                    continue
+                t = [ratio[p][0] for p in xs]
+                m = [ratio[p][1] for p in xs]
             ax1.plot(xs, t, color=color, marker="o", linewidth=2.0, label=label)
             ax2.plot(xs, m, color=color, marker="o", linewidth=2.0, label=label)
+
+    if use_gpu:
+        ax1.set_title("3D sine wave: subgrid chunk-size JAX GPU")
+        ax1.set_ylabel("Cold-start total time (s)")
+        ax2.set_ylabel("Peak GPU Memory (MB)")
+    else:
+        for ax in (ax1, ax2):
+            ax.axhline(1.0, color="0.55", linestyle="--", linewidth=1.3)
+        ax1.set_title("3D sine wave: subgrid chunk-size NumPy/JAX ratios")
+        ax1.set_ylabel("NumPy time / JAX time")
+        ax2.set_ylabel("NumPy peak RSS / JAX peak RSS")
+
     for ax in (ax1, ax2):
-        ax.axhline(1.0, color="0.55", linestyle="--", linewidth=1.3)
         ax.grid(axis="y", alpha=0.25)
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
-    ax1.set_title("3D sine wave: subgrid chunk-size NumPy/JAX ratios")
-    ax1.set_ylabel("NumPy time / JAX time")
-    ax2.set_ylabel("NumPy peak RSS / JAX peak RSS")
     ax2.set_xlabel("Points per parameter axis")
     ax1.set_xlim(10, 80)
     ax2.set_xlim(10, 80)
@@ -328,23 +500,40 @@ def plot_subgrid_chunk_ratio(root: Path, all_data: dict[str, dict], styles: dict
     return out
 
 
-def plot_time_series_full(root: Path, all_data: dict[str, dict], styles: dict[str, str]) -> Path:
-    out = root / "cold_memory_trace_3d_full_p80_timeseries_ready_all_machines.png"
+def plot_time_series_full(
+    root: Path, all_data: dict[str, dict], styles: dict[str, str],
+    sample_key: str = "rss_mb",
+) -> Path:
+    suffix = "_gpu" if sample_key in ("gpu_mb", "jax_gpu_mb") else ""
+    out = root / f"cold_memory_trace_3d_full_p80_timeseries_ready_all_machines{suffix}.png"
+    mem_name = "GPU Memory" if sample_key in ("gpu_mb", "jax_gpu_mb") else "RSS"
+    use_abs_gpu = sample_key == "gpu_mb"
+    if sample_key == "jax_gpu_mb":
+        use_abs_gpu = True
     fig, ax = plt.subplots(figsize=(9.2, 5.2))
     for machine, data in sorted(all_data.items()):
         base = styles[machine]
         n = pick_trace(data["full"], "3d_full", 80, "numpy")
         j = pick_trace(data["full"], "3d_full", 80, "jax")
-        if not n or not j:
-            continue
-        tn, rn = to_ready_relative(n)
-        tj, rj = to_ready_relative(j)
-        ax.plot(tn, rn, color=base, linestyle="--", linewidth=2.0, label=f"{machine} NumPy")
-        ax.plot(tj, rj, color=base, linestyle="-", linewidth=2.0, label=f"{machine} JAX")
+        if j:
+            if use_abs_gpu:
+                tj, rj = gpu_abs_series_from_alloc_baseline(j, sample_key=sample_key)
+            else:
+                tj, rj = to_ready_relative(j, sample_key=sample_key)
+            ax.plot(tj, rj, color=base, linestyle="-", linewidth=2.0, label=f"{machine} JAX")
+        if n:
+            tn, rn = to_ready_relative(n, sample_key=sample_key)
+            ax.plot(tn, rn, color=base, linestyle="--", linewidth=2.0, label=f"{machine} NumPy")
     ax.axvline(0.0, color="0.5", linestyle="--", linewidth=1.4)
     ax.set_title("3D full-grid (points=80): memory time series")
     ax.set_xlabel("Elapsed time relative to worker ready state (s)")
-    ax.set_ylabel("Worker RSS delta from ready state (MB)")
+    if use_abs_gpu:
+        if sample_key == "jax_gpu_mb":
+            ax.set_ylabel("JAX bytes_in_use (MB)")
+        else:
+            ax.set_ylabel(f"Worker {mem_name} (MB, NVML PID)")
+    else:
+        ax.set_ylabel(f"Worker {mem_name} delta from ready state (MB)")
     ax.grid(axis="y", alpha=0.25)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -354,8 +543,16 @@ def plot_time_series_full(root: Path, all_data: dict[str, dict], styles: dict[st
     return out
 
 
-def plot_time_series_chunk5(root: Path, all_data: dict[str, dict], styles: dict[str, str]) -> Path:
-    out = root / "cold_memory_trace_3d_subgrid_chunk5_p80_timeseries_ready_all_machines.png"
+def plot_time_series_chunk5(
+    root: Path, all_data: dict[str, dict], styles: dict[str, str],
+    sample_key: str = "rss_mb",
+) -> Path:
+    suffix = "_gpu" if sample_key in ("gpu_mb", "jax_gpu_mb") else ""
+    out = root / f"cold_memory_trace_3d_subgrid_chunk5_p80_timeseries_ready_all_machines{suffix}.png"
+    mem_name = "GPU Memory" if sample_key in ("gpu_mb", "jax_gpu_mb") else "RSS"
+    use_abs_gpu = sample_key == "gpu_mb"
+    if sample_key == "jax_gpu_mb":
+        use_abs_gpu = True
     fig, ax = plt.subplots(figsize=(9.2, 5.2))
     for machine, data in sorted(all_data.items()):
         base = styles[machine]
@@ -365,16 +562,25 @@ def plot_time_series_chunk5(root: Path, all_data: dict[str, dict], styles: dict[
             continue
         n = pick_trace(traces, "3d_subgrid", 80, "numpy")
         j = pick_trace(traces, "3d_subgrid", 80, "jax")
-        if not n or not j:
-            continue
-        tn, rn = to_ready_relative(n)
-        tj, rj = to_ready_relative(j)
-        ax.plot(tn, rn, color=color, linestyle="--", linewidth=2.0, label=f"{machine} NumPy")
-        ax.plot(tj, rj, color=color, linestyle="-", linewidth=2.0, label=f"{machine} JAX")
+        if j:
+            if use_abs_gpu:
+                tj, rj = gpu_abs_series_from_alloc_baseline(j, sample_key=sample_key)
+            else:
+                tj, rj = to_ready_relative(j, sample_key=sample_key)
+            ax.plot(tj, rj, color=color, linestyle="-", linewidth=2.0, label=f"{machine} JAX")
+        if n:
+            tn, rn = to_ready_relative(n, sample_key=sample_key)
+            ax.plot(tn, rn, color=color, linestyle="--", linewidth=2.0, label=f"{machine} NumPy")
     ax.axvline(0.0, color="0.5", linestyle="--", linewidth=1.4)
     ax.set_title("3D subgrid (chunk=5, points=80): memory time series")
     ax.set_xlabel("Elapsed time relative to worker ready state (s)")
-    ax.set_ylabel("Worker RSS delta from ready state (MB)")
+    if use_abs_gpu:
+        if sample_key == "jax_gpu_mb":
+            ax.set_ylabel("JAX bytes_in_use (MB)")
+        else:
+            ax.set_ylabel(f"Worker {mem_name} (MB, NVML PID)")
+    else:
+        ax.set_ylabel(f"Worker {mem_name} delta from ready state (MB)")
     ax.grid(axis="y", alpha=0.25)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -394,8 +600,20 @@ def main() -> None:
     styles[args.machine] = normalize_color(args.color)
     save_styles(styles_path, styles)
 
+    use_gpu = args.device == "gpu"
+    mem_key = "jax_peak_gpu_mb" if use_gpu else "peak_rss_mb"
+    sample_key = "jax_gpu_mb" if use_gpu else "rss_mb"
+
     if not args.skip_collect:
-        collect_machine(root, args.machine, args.sample_interval)
+        collect_machine(
+            root,
+            args.machine,
+            args.sample_interval,
+            device=args.device,
+            jax_preallocate=args.jax_preallocate,
+            jax_allocator=args.jax_allocator,
+            jax_mem_fraction=args.jax_mem_fraction,
+        )
 
     all_data: dict[str, dict] = {}
     for machine in sorted(styles):
@@ -403,7 +621,7 @@ def main() -> None:
         if not mdir.exists():
             continue
         try:
-            all_data[machine] = load_machine_traces(root, machine)
+            all_data[machine] = load_machine_traces(root, machine, device=args.device)
         except FileNotFoundError:
             continue
 
@@ -414,12 +632,12 @@ def main() -> None:
         )
 
     for machine, traces in all_data.items():
-        write_machine_ratio_csvs(root, machine, traces)
+        write_machine_csvs(root, machine, traces, mem_key=mem_key, use_gpu=use_gpu)
 
-    p1 = plot_full_ratio(root, all_data, styles)
-    p2 = plot_subgrid_chunk_ratio(root, all_data, styles)
-    p3 = plot_time_series_full(root, all_data, styles)
-    p4 = plot_time_series_chunk5(root, all_data, styles)
+    p1 = plot_full_grid(root, all_data, styles, mem_key=mem_key, use_gpu=use_gpu)
+    p2 = plot_subgrid_chunk(root, all_data, styles, mem_key=mem_key, use_gpu=use_gpu)
+    p3 = plot_time_series_full(root, all_data, styles, sample_key=sample_key)
+    p4 = plot_time_series_chunk5(root, all_data, styles, sample_key=sample_key)
 
     print(f"styles: {styles_path}")
     print(f"machine_data: {machine_dir(root, args.machine)}")
