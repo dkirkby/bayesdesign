@@ -10,7 +10,7 @@ jnp = pytest.importorskip("jax.numpy")
 
 import bed_jax
 from bed_jax.design import ExperimentDesigner
-from bed_jax.grid import CosineBump, Gaussian, Grid, TopHat
+from bed_jax.grid import CosineBump, Gaussian, Grid, PermutationInvariant, TopHat
 
 RTOL = 1e-6
 
@@ -36,6 +36,14 @@ def target_device(request):
 def _dummy_lfunc(params, features, designs, **kwargs):
     y_mean = params.p * designs.t
     y_diff = features.y - y_mean
+    return jnp.exp(-0.5 * (y_diff / kwargs["sigma_y"]) ** 2)
+
+
+def _sine_lfunc(params, features, designs, **kwargs):
+    y_mean = params.amplitude * jnp.sin(
+        params.frequency * (designs.t_obs - params.offset)
+    )
+    y_diff = features.y_obs - y_mean
     return jnp.exp(-0.5 * (y_diff / kwargs["sigma_y"]) ** 2)
 
 
@@ -209,6 +217,56 @@ def test_designer_methods_run_on_selected_device(target_device):
     updated_best = designer.update(t=0.0, y=0.0)
     assert "t" in updated_best
     assert designer.EIG.device.platform == target_device.platform
+
+
+def test_designer_repeated_calculateEIG_stable_and_cached():
+    params = Grid(p=jnp.array([0.0, 1.0, 2.0]))
+    features = Grid(y=jnp.linspace(-1.0, 1.0, 21))
+    designs = Grid(t=jnp.linspace(0.0, 1.0, 11))
+    designer = ExperimentDesigner(
+        params, features, designs, _dummy_lfunc, lfunc_args={"sigma_y": 0.25}
+    )
+    prior = params.normalize(jnp.ones(params.shape))
+
+    best1 = designer.calculateEIG(prior)
+    eig1 = jnp.array(designer.EIG)
+    posterior = designer.get_posterior(t=0.5, y=0.2)
+
+    best2 = designer.calculateEIG(prior)
+    eig2 = jnp.array(designer.EIG)
+    assert best1.keys() == best2.keys()
+    assert bool(jnp.allclose(eig1, eig2, rtol=RTOL))
+    assert posterior.shape == params.shape
+
+
+def test_designer_subgrid_fullgrid_parity():
+    designs = Grid(t_obs=jnp.linspace(0, 4, 24))
+    features = Grid(y_obs=jnp.linspace(-1.4, 1.4, 32))
+    params = Grid(
+        amplitude=jnp.linspace(0.5, 1.5, 7),
+        frequency=jnp.linspace(0.2, 2.0, 9),
+        offset=jnp.linspace(-0.5, 0.5, 7),
+    )
+
+    full_designer = ExperimentDesigner(
+        params, features, designs, _sine_lfunc, lfunc_args={"sigma_y": 0.1}
+    )
+    subgrid_designer = ExperimentDesigner(
+        params, features, designs, _sine_lfunc, lfunc_args={"sigma_y": 0.1}, mem=2
+    )
+
+    prior = params.normalize(jnp.ones(params.shape))
+    full_designer.calculateEIG(prior)
+    subgrid_designer.calculateEIG(prior)
+    assert bool(
+        jnp.allclose(full_designer.EIG, subgrid_designer.EIG, rtol=1e-6, atol=1e-9)
+    )
+
+    full_marginal = full_designer.calculateMarginalEIG("amplitude", "offset")
+    subgrid_marginal = subgrid_designer.calculateMarginalEIG("amplitude", "offset")
+    assert bool(
+        jnp.allclose(full_marginal, subgrid_marginal, rtol=1e-6, atol=1e-9)
+    )
 
 
 def test_designer_requested_device_mismatch_raises():
