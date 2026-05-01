@@ -1,4 +1,4 @@
-"""JAX runtime and device-selection tests for bed_jax."""
+"""Runtime and device-selection tests for bed."""
 
 import inspect
 
@@ -8,9 +8,9 @@ jax = pytest.importorskip("jax")
 jax.config.update("jax_enable_x64", True)
 jnp = pytest.importorskip("jax.numpy")
 
-import bed_jax
-from bed_jax.design import ExperimentDesigner
-from bed_jax.grid import CosineBump, Gaussian, Grid, PermutationInvariant, TopHat
+import bed
+from bed.design import ExperimentDesigner
+from bed.grid import CosineBump, Gaussian, Grid, PermutationInvariant, TopHat
 
 RTOL = 1e-6
 
@@ -48,7 +48,7 @@ def _sine_lfunc(params, features, designs, **kwargs):
 
 
 def test_imports_and_symbols():
-    assert bed_jax is not None
+    assert bed is not None
     assert callable(Grid)
     assert callable(ExperimentDesigner)
 

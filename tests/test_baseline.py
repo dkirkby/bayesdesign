@@ -1,14 +1,4 @@
-"""Golden-value baseline tests for JAX rewrite compatibility contract.
-
-These tests capture the exact numerical outputs of the current NumPy
-implementation. They will later verify that the JAX rewrite produces
-identical (or sufficiently close) results.
-
-Tolerance strategy:
-- NumPy-to-NumPy (current): rtol=1e-12 (deterministic, same platform)
-- JAX target (float64, CPU or GPU): rtol=1e-7
-- JAX target (float32):      rtol=1e-3
-"""
+"""Golden-value baseline tests for the JAX implementation."""
 
 from __future__ import annotations
 
@@ -19,23 +9,18 @@ import pytest
 
 
 def _jax_device_kw(backend: dict) -> dict:
-    if backend.get("name") != "jax":
-        return {}
     return {"device": backend["jax_device"]}
 
 
 @contextlib.contextmanager
 def _jax_array_scope(backend: dict):
     """For JAX-only grid helpers (TopHat, etc.), match the backend device."""
-    if backend.get("name") != "jax":
-        yield
-        return
     import jax
 
     with jax.default_device(jax.devices(backend["jax_device"])[0]):
         yield
 
-# Baseline tests consume backend-specific tolerances from conftest fixtures.
+
 def _rtol(case):
     return case["rtol"]
 
@@ -281,8 +266,6 @@ class TestSineWaveBaseline:
         designer = sine_wave_designer["designer"]
         rtol = _rtol(sine_wave_designer)
         assert designer.H0 == pytest.approx(SINE_H0, rel=rtol)
-        if sine_wave_designer["backend"] == "numpy":
-            assert designer.H0 == pytest.approx(np.log2(181), rel=1e-15)
 
     def test_EIG_full_array(self, sine_wave_designer):
         designer = sine_wave_designer["designer"]
