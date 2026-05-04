@@ -155,7 +155,10 @@ class Grid:
 
     def __getattr__(self, name):
         """Return a 1D array of values for the named axis."""
-        axis = self.axes[name]
+        try:
+            axis = self.axes[name]
+        except KeyError:
+            raise AttributeError(name) from None
         return axis.reshape(axis.shape + tuple([1] * self._stack_pad))
 
     def expand(self, values, missing=jnp.nan):
