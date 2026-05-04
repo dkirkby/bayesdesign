@@ -4,3 +4,6 @@ include *.txt
 include LICENSE
 recursive-include tests test*.py
 recursive-include scripts *.py
+recursive-include docs *.csv
+recursive-include docs *.md
+recursive-include docs *.png

@@ -31,12 +31,14 @@ setuptools.setup(
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
     ],
-    python_requires=">=3.6",
-    install_requires=["numpy"],
+    python_requires=">=3.10",
+    install_requires=["numpy", "jax>=0.4.0"],
     extras_require={
         "dev": ["check-manifest"],
-        "jax": ["jax>=0.4.0; python_version >= '3.10'"],
-        "jax-cpu": ["jax[cpu]>=0.4.0; python_version >= '3.10'"],
+        "jax-cuda13": ["jax[cuda13]>=0.4.0"],
+        "jax-cuda12": ["jax[cuda12]>=0.4.0"],
+        "benchmark": ["psutil", "matplotlib"],
+        "benchmark-gpu": ["psutil", "matplotlib", "nvidia-ml-py"],
         # 'test': ['coverage'],
     },
     # entry_points={

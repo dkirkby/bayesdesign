@@ -53,7 +53,11 @@ def cornerPlot(data, grid, asize=2.5, hwspace=0.25, cmap="Blues", CL=(0.683, 0.9
             raise ValueError("CL values must be increasing")
 
     # Ignore axes with length 1.
-    axes = {name: axis.ravel() for name, axis in grid.axes_in.items() if axis.size > 1}
+    axes = {
+        name: np.asarray(axis).ravel()
+        for name, axis in grid.axes_in.items()
+        if axis.size > 1
+    }
     naxes = len(axes)
 
     # Initialize the figure.
@@ -77,7 +81,7 @@ def cornerPlot(data, grid, asize=2.5, hwspace=0.25, cmap="Blues", CL=(0.683, 0.9
                 axlist = tuple(
                     [name for k, name in enumerate(axes) if k not in (row, col)]
                 )
-                data2d = grid.sum(data, axis_names=axlist).T
+                data2d = np.asarray(grid.sum(data, axis_names=axlist).T)
                 vmax = 1.5 * data2d.max()
                 ax.imshow(
                     data2d,
@@ -106,7 +110,7 @@ def cornerPlot(data, grid, asize=2.5, hwspace=0.25, cmap="Blues", CL=(0.683, 0.9
                     )
             else:
                 axlist = tuple([name for k, name in enumerate(axes) if k != row])
-                data1d = grid.sum(data, axis_names=axlist)
+                data1d = np.asarray(grid.sum(data, axis_names=axlist))
                 ax.fill_between(axes[rname], data1d, ec="none", fc=fc)
                 ax.plot(axes[rname], data1d, c=ec)
                 ax.set(ylim=(0, None), yticks=[])

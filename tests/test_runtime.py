@@ -1,16 +1,17 @@
-"""JAX runtime and device-selection tests for bed_jax."""
+"""Runtime and device-selection tests for bed."""
 
 import inspect
 
+import numpy as np
 import pytest
 
 jax = pytest.importorskip("jax")
 jax.config.update("jax_enable_x64", True)
 jnp = pytest.importorskip("jax.numpy")
 
-import bed_jax
-from bed_jax.design import ExperimentDesigner
-from bed_jax.grid import CosineBump, Gaussian, Grid, TopHat
+import bed
+from bed.design import ExperimentDesigner
+from bed.grid import CosineBump, Gaussian, Grid, PermutationInvariant, TopHat
 
 RTOL = 1e-6
 
@@ -39,8 +40,16 @@ def _dummy_lfunc(params, features, designs, **kwargs):
     return jnp.exp(-0.5 * (y_diff / kwargs["sigma_y"]) ** 2)
 
 
+def _sine_lfunc(params, features, designs, **kwargs):
+    y_mean = params.amplitude * jnp.sin(
+        params.frequency * (designs.t_obs - params.offset)
+    )
+    y_diff = features.y_obs - y_mean
+    return jnp.exp(-0.5 * (y_diff / kwargs["sigma_y"]) ** 2)
+
+
 def test_imports_and_symbols():
-    assert bed_jax is not None
+    assert bed is not None
     assert callable(Grid)
     assert callable(ExperimentDesigner)
 
@@ -76,6 +85,7 @@ def test_designer_signatures():
         "unnorm_lfunc",
         "lfunc_args",
         "mem",
+        "design_chunk_size",
         "device",
     ]
 
@@ -130,6 +140,15 @@ def test_grid_normalize_returns_jax_array():
     assert bool(jnp.isclose(jnp.sum(normed), 1.0, rtol=RTOL))
 
 
+def test_grid_normalize_updates_mutable_numpy_input():
+    grid = Grid(x=jnp.arange(3))
+    values = np.ones(grid.shape)
+    normed = grid.normalize(values)
+    assert _is_jax_array(normed)
+    assert np.isclose(grid.sum(values), 1.0, rtol=RTOL)
+    np.testing.assert_allclose(values, np.asarray(normed), rtol=RTOL)
+
+
 def test_grid_device_placement(target_device):
     grid = Grid(
         device=target_device.platform,
@@ -177,6 +196,19 @@ def test_designer_structural_init_and_core_methods():
     assert "t" in updated_best
 
 
+def test_designer_prior_validation_mentions_normalize_return_value():
+    params = Grid(p=jnp.array([0.0, 1.0]))
+    features = Grid(y=jnp.array([0.0, 1.0]))
+    designs = Grid(t=jnp.array([0.0, 1.0]))
+    designer = ExperimentDesigner(
+        params, features, designs, _dummy_lfunc, lfunc_args={"sigma_y": 0.25}
+    )
+    prior = jnp.ones(params.shape)
+
+    with pytest.raises(ValueError, match="prior = params.normalize\\(prior\\)"):
+        designer.calculateEIG(prior)
+
+
 def test_designer_methods_run_on_selected_device(target_device):
     params = Grid(
         device=target_device.platform,
@@ -208,6 +240,80 @@ def test_designer_methods_run_on_selected_device(target_device):
     updated_best = designer.update(t=0.0, y=0.0)
     assert "t" in updated_best
     assert designer.EIG.device.platform == target_device.platform
+
+
+def test_designer_repeated_calculateEIG_stable_and_cached():
+    params = Grid(p=jnp.array([0.0, 1.0, 2.0]))
+    features = Grid(y=jnp.linspace(-1.0, 1.0, 21))
+    designs = Grid(t=jnp.linspace(0.0, 1.0, 11))
+    designer = ExperimentDesigner(
+        params, features, designs, _dummy_lfunc, lfunc_args={"sigma_y": 0.25}
+    )
+    prior = params.normalize(jnp.ones(params.shape))
+
+    best1 = designer.calculateEIG(prior)
+    eig1 = jnp.array(designer.EIG)
+    posterior = designer.get_posterior(t=0.5, y=0.2)
+
+    best2 = designer.calculateEIG(prior)
+    eig2 = jnp.array(designer.EIG)
+    assert best1.keys() == best2.keys()
+    assert bool(jnp.allclose(eig1, eig2, rtol=RTOL))
+    assert posterior.shape == params.shape
+
+
+def test_designer_subgrid_fullgrid_parity():
+    designs = Grid(t_obs=jnp.linspace(0, 4, 24))
+    features = Grid(y_obs=jnp.linspace(-1.4, 1.4, 32))
+    params = Grid(
+        amplitude=jnp.linspace(0.5, 1.5, 7),
+        frequency=jnp.linspace(0.2, 2.0, 9),
+        offset=jnp.linspace(-0.5, 0.5, 7),
+    )
+
+    full_designer = ExperimentDesigner(
+        params, features, designs, _sine_lfunc, lfunc_args={"sigma_y": 0.1}
+    )
+    subgrid_designer = ExperimentDesigner(
+        params, features, designs, _sine_lfunc, lfunc_args={"sigma_y": 0.1}, mem=2
+    )
+
+    prior = params.normalize(jnp.ones(params.shape))
+    full_designer.calculateEIG(prior)
+    subgrid_designer.calculateEIG(prior)
+    assert bool(
+        jnp.allclose(full_designer.EIG, subgrid_designer.EIG, rtol=1e-6, atol=1e-9)
+    )
+
+    full_marginal = full_designer.calculateMarginalEIG("amplitude", "offset")
+    subgrid_marginal = subgrid_designer.calculateMarginalEIG("amplitude", "offset")
+    assert bool(
+        jnp.allclose(full_marginal, subgrid_marginal, rtol=1e-6, atol=1e-9)
+    )
+
+
+def test_designer_subgrid_requires_jax_traceable_likelihood():
+    params = Grid(p=jnp.array([0.0, 1.0]))
+    features = Grid(y=jnp.linspace(-1.0, 1.0, 5))
+    designs = Grid(t=jnp.linspace(0.0, 1.0, 4))
+
+    def numpy_lfunc(params, features, designs, **kwargs):
+        y_mean = np.square(designs.t - params.p)
+        y_diff = features.y - y_mean
+        return np.exp(-0.5 * np.square(y_diff / kwargs["sigma_y"]))
+
+    designer = ExperimentDesigner(
+        params,
+        features,
+        designs,
+        numpy_lfunc,
+        lfunc_args={"sigma_y": 0.25},
+        design_chunk_size=2,
+    )
+    prior = params.normalize(np.ones(params.shape))
+
+    with pytest.raises(TypeError, match="unnorm_lfunc must be JAX-traceable"):
+        designer.calculateEIG(prior)
 
 
 def test_designer_requested_device_mismatch_raises():

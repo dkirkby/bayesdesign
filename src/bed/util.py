@@ -1,12 +1,6 @@
-"""Shared utility functions for the JAX backend."""
+"""Shared utility functions for the JAX implementation."""
 
-try:
-    import jax
-except Exception as exc:  # pragma: no cover - import-time dependency guard
-    raise ImportError(
-        "bed_jax requires JAX. Install with `pip install -e '.[jax-cpu]'` "
-        "or `pip install -e '.[jax]'."
-    ) from exc
+import jax
 
 
 def resolve_device(device):
