@@ -15,7 +15,16 @@ from .util import resolve_device
 class Grid:
 
     def __init__(self, constraint=None, full_shape=None, device=None, **axes):
-        self.device = resolve_device(device)
+        if device is None:
+            # Infer the device from the first JAX array input, if any.
+            inferred = None
+            for v in axes.values():
+                if isinstance(v, jax.Array):
+                    inferred = v.device
+                    break
+            self.device = inferred if inferred is not None else resolve_device(None)
+        else:
+            self.device = resolve_device(device)
         self.axes = {}
         self.axes_in = {}
         naxes = len(axes)
