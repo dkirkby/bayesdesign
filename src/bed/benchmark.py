@@ -3,10 +3,10 @@
 import csv as csv_module
 import json
 import os
+import re
 import sys
 import threading
 import time
-from collections import defaultdict
 from pathlib import Path
 
 MIB = float(1 << 20)
@@ -66,15 +66,6 @@ def _jax_bytes_in_use_mb():
         return float(stats.get("bytes_in_use", 0)) / MIB
     except Exception:
         return 0.0
-
-
-def _sync_result(result, sync):
-    if sync is not None:
-        sync(result)
-        return
-    block = getattr(result, "block_until_ready", None)
-    if callable(block):
-        block()
 
 
 def _plot_trace(trace, output):
@@ -138,6 +129,110 @@ def _write_summary(trace, output):
         writer.writeheader()
         writer.writerow(row)
     return output
+
+
+def _safe_column_label(label):
+    label = re.sub(r"[^0-9A-Za-z]+", "_", str(label)).strip("_").lower()
+    return label or "trace"
+
+
+def _labeled_traces(traces):
+    counts = {}
+    for item in traces:
+        if isinstance(item, tuple) and len(item) == 2:
+            label, trace = item
+        else:
+            trace = item
+            label = trace.get("label", "trace")
+        label = str(label)
+        safe_label = _safe_column_label(label)
+        counts[safe_label] = counts.get(safe_label, 0) + 1
+        if counts[safe_label] > 1:
+            safe_label = f"{safe_label}_{counts[safe_label]}"
+        yield safe_label, trace
+
+
+def combine_memory_traces(
+    traces,
+    *,
+    time_bin_s=0.1,
+    sample_key="rss_mb",
+    relative_to="start",
+):
+    """Combine multiple trace memory series into one wide, binned table.
+
+    The result is a list of dictionaries with ``time_bin_s`` plus one
+    ``<label>_<metric>_delta_mb`` column per trace. Pass ``[(label, trace), ...]``
+    to control column names; otherwise each trace's ``label`` is used.
+    """
+    if time_bin_s <= 0:
+        raise ValueError("time_bin_s must be positive.")
+    if relative_to not in {"start", "ready"}:
+        raise ValueError("relative_to must be 'start' or 'ready'.")
+
+    series_by_column = {}
+    for safe_label, trace in _labeled_traces(traces):
+        samples = trace["samples"]
+        t_values = samples["t_s"]
+        sample_values = samples[sample_key]
+        if not t_values or not sample_values:
+            continue
+
+        if relative_to == "ready":
+            origin_s = float(trace.get("ready_elapsed_s", t_values[0]))
+            origin_index = next(
+                (index for index, t_s in enumerate(t_values) if float(t_s) >= origin_s),
+                len(t_values) - 1,
+            )
+        else:
+            origin_index = 0
+        origin_t_s = float(t_values[origin_index])
+        origin_value = float(sample_values[origin_index])
+
+        binned = {}
+        for t_s, value in zip(t_values, sample_values):
+            relative_t_s = float(t_s) - origin_t_s
+            bin_index = int(relative_t_s // time_bin_s)
+            delta = float(value) - origin_value
+            if bin_index not in binned:
+                binned[bin_index] = delta
+            elif bin_index < 0:
+                binned[bin_index] = min(binned[bin_index], delta)
+            else:
+                binned[bin_index] = max(binned[bin_index], delta)
+
+        column = f"{safe_label}_{sample_key.removesuffix('_mb')}_delta_mb"
+        series_by_column[column] = binned
+
+    if not series_by_column:
+        return []
+
+    columns = list(series_by_column)
+    min_bin = min(min(series) for series in series_by_column.values())
+    max_bin = max(max(series) for series in series_by_column.values())
+    rows = []
+    for bin_index in range(min_bin, max_bin + 1):
+        row = {"time_bin_s": bin_index * time_bin_s}
+        for column in columns:
+            row[column] = series_by_column[column].get(bin_index, "")
+        rows.append(row)
+    return rows
+
+
+def _display_or_save(fig, output_path):
+    if output_path is None:
+        fig.tight_layout()
+        plt = _require_matplotlib()
+        plt.show()
+        plt.close(fig)
+        return None
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=220, bbox_inches="tight")
+    plt = _require_matplotlib()
+    plt.close(fig)
+    return output_path
 
 
 def _normalize_csv_inputs(csv_paths, labels):
@@ -222,18 +317,59 @@ def _finish_plot(fig, ax, output_path, title, ylabel):
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.legend(frameon=False)
-    fig.tight_layout()
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output_path, dpi=220, bbox_inches="tight")
-    fig.clear()
-    return output_path
+    return _display_or_save(fig, output_path)
+
+
+def _is_row_table(data):
+    return isinstance(data, (list, tuple)) and (
+        not data or isinstance(data[0], dict)
+    )
+
+
+def _plot_timeseries_rows(
+    ax,
+    rows,
+    *,
+    label,
+    time_col,
+    value_cols,
+    colors_by_label,
+    linestyles_by_label,
+    alpha_by_label,
+):
+    columns = _selected_columns(value_cols, label, rows, {time_col})
+    for column in columns:
+        points = [
+            (_as_float(row.get(time_col)), _as_float(row.get(column)))
+            for row in rows
+        ]
+        points = [(x, y) for x, y in points if x is not None and y is not None]
+        if not points:
+            continue
+        x_values, y_values = zip(*points)
+        series_label = label if label and len(columns) == 1 else column
+        if label and len(columns) > 1:
+            series_label = f"{label}: {column}"
+        ax.plot(
+            x_values,
+            y_values,
+            color=colors_by_label.get(label) or colors_by_label.get(series_label),
+            linestyle=(
+                linestyles_by_label.get(label)
+                or linestyles_by_label.get(series_label)
+                or "-"
+            ),
+            marker="o" if len(points) == 1 else None,
+            alpha=alpha_by_label.get(label) or alpha_by_label.get(series_label),
+            linewidth=2.0,
+            label=series_label,
+        )
 
 
 def plot_timeseries(
-    csv_paths,
-    labels,
-    output_path,
+    data,
+    labels=None,
+    output_path=None,
     *,
     time_col="time_bin_s",
     value_cols=None,
@@ -243,16 +379,18 @@ def plot_timeseries(
     ylabel="RSS delta (MiB)",
     title=None,
 ):
-    """Plot one or more benchmark memory time-series CSVs.
+    """Plot benchmark memory time series from CSVs or in-memory rows.
 
     Parameters
     ----------
-    csv_paths : sequence of path-like
-        CSV files containing a time column and one or more numeric value columns.
-    labels : sequence of str
-        Legend labels corresponding to ``csv_paths``.
+    data : sequence
+        Either CSV paths or an in-memory list of row dictionaries, such as the
+        output of ``combine_memory_traces(...)``.
+    labels : sequence of str, optional
+        For CSV inputs, legend labels corresponding to paths. For in-memory
+        rows, optional labels corresponding to selected value columns.
     output_path : path-like
-        Destination image path.
+        Destination image path. If omitted, display inline with ``plt.show()``.
     time_col : str
         Name of the time axis column.
     value_cols : sequence of str, optional
@@ -266,113 +404,64 @@ def plot_timeseries(
     ylabel, title : str, optional
         Plot labels.
     """
-    paths, labels = _normalize_csv_inputs(csv_paths, labels)
+    if _is_row_table(data):
+        rows = list(data)
+        labels = list(labels or [])
+        columns = _selected_columns(value_cols, "", rows, {time_col})
+        if labels and len(labels) != len(columns):
+            raise ValueError("labels and value columns must have the same length.")
+        if labels:
+            value_cols = dict(zip(labels, columns))
+    else:
+        paths, labels = _normalize_csv_inputs(data, labels or [])
+
     colors_by_label = _style_by_label(colors, labels, "colors")
     linestyles_by_label = _style_by_label(linestyles, labels, "linestyles")
     alpha_by_label = _alpha_by_label(alpha, labels)
     plt = _require_matplotlib()
     fig, ax = plt.subplots(figsize=(9, 4.8))
 
-    for path, label in zip(paths, labels):
-        rows = _read_csv(path)
-        columns = _selected_columns(value_cols, label, rows, {time_col})
-        for column in columns:
-            points = [
-                (_as_float(row.get(time_col)), _as_float(row.get(column)))
-                for row in rows
-            ]
-            points = [(x, y) for x, y in points if x is not None and y is not None]
-            if not points:
-                continue
-            x_values, y_values = zip(*points)
-            series_label = label if len(columns) == 1 else f"{label}: {column}"
-            ax.plot(
-                x_values,
-                y_values,
-                color=colors_by_label.get(label),
-                linestyle=linestyles_by_label.get(label, "-"),
-                alpha=alpha_by_label.get(label),
-                linewidth=2.0,
-                label=series_label,
+    if _is_row_table(data):
+        rows = list(data)
+        if labels:
+            for label in labels:
+                _plot_timeseries_rows(
+                    ax,
+                    rows,
+                    label=label,
+                    time_col=time_col,
+                    value_cols=value_cols,
+                    colors_by_label=colors_by_label,
+                    linestyles_by_label=linestyles_by_label,
+                    alpha_by_label=alpha_by_label,
+                )
+        else:
+            _plot_timeseries_rows(
+                ax,
+                rows,
+                label="",
+                time_col=time_col,
+                value_cols=value_cols,
+                colors_by_label=colors_by_label,
+                linestyles_by_label=linestyles_by_label,
+                alpha_by_label=alpha_by_label,
+            )
+    else:
+        for path, label in zip(paths, labels):
+            _plot_timeseries_rows(
+                ax,
+                _read_csv(path),
+                label=label,
+                time_col=time_col,
+                value_cols=value_cols,
+                colors_by_label=colors_by_label,
+                linestyles_by_label=linestyles_by_label,
+                alpha_by_label=alpha_by_label,
             )
 
     ax.set_xlabel("Elapsed time (s)")
     ax.axvline(0.0, color="0.5", linestyle="--", linewidth=1.2)
     return _finish_plot(fig, ax, output_path, title, ylabel)
-
-
-def plot_sweep(
-    csv_paths,
-    labels,
-    output_path,
-    *,
-    x_col="n_param_axis",
-    y_col="call_elapsed_s",
-    group_col="backend",
-    colors=None,
-    linestyles=None,
-    alpha=None,
-    ylabel=None,
-    title=None,
-):
-    """Plot benchmark sweep CSVs grouped by backend or another column."""
-    paths, labels = _normalize_csv_inputs(csv_paths, labels)
-    colors_by_label = _style_by_label(colors, labels, "colors")
-    linestyles_by_label = _style_by_label(linestyles, labels, "linestyles")
-    alpha_by_label = _alpha_by_label(alpha, labels)
-    plt = _require_matplotlib()
-    fig, ax = plt.subplots(figsize=(7.5, 4.8))
-
-    grouped = defaultdict(list)
-    for path, label in zip(paths, labels):
-        rows = _read_csv(path)
-        y_columns = _selected_columns(y_col, label, rows, {x_col, group_col})
-        for row in _read_csv(path):
-            for y_column in y_columns:
-                x_value = _as_float(row.get(x_col))
-                y_value = _as_float(row.get(y_column))
-                if x_value is None or y_value is None:
-                    continue
-                group = row.get(group_col, "") if group_col else ""
-                if label and group:
-                    series_label = f"{label}: {group}"
-                elif label and len(y_columns) > 1:
-                    series_label = f"{label}: {y_column}"
-                else:
-                    series_label = group or label or y_column
-                grouped[series_label].append((x_value, y_value, label, group or y_column))
-
-    for series_label, points in grouped.items():
-        points = sorted(points)
-        x_values = [point[0] for point in points]
-        y_values = [point[1] for point in points]
-        label = points[0][2]
-        group = points[0][3]
-        ax.plot(
-            x_values,
-            y_values,
-            color=(
-                colors_by_label.get(series_label)
-                or colors_by_label.get(group)
-                or colors_by_label.get(label)
-            ),
-            linestyle=(
-                linestyles_by_label.get(series_label)
-                or linestyles_by_label.get(group)
-                or linestyles_by_label.get(label)
-                or "-"
-            ),
-            alpha=(
-                alpha_by_label.get(series_label)
-                or alpha_by_label.get(group)
-                or alpha_by_label.get(label)
-            ),
-            linewidth=2.0,
-            label=series_label,
-        )
-
-    ax.set_xlabel(x_col)
-    return _finish_plot(fig, ax, output_path, title, ylabel or y_col)
 
 
 def profile(
@@ -384,7 +473,6 @@ def profile(
     plot=True,
     csv=True,
     gpu=False,
-    sync=None,
     metadata=None,
 ):
     """Profile a callable in the current Python process.
@@ -392,8 +480,7 @@ def profile(
     Parameters
     ----------
     func : callable
-        Work to benchmark. The elapsed time includes this function and any
-        optional synchronization.
+        Work to benchmark.
     out_dir : path-like, optional
         If provided, write trace.json and optionally trace.png / summary.csv.
     label : str
@@ -406,9 +493,6 @@ def profile(
         Write summary.csv when out_dir is provided.
     gpu : bool
         Also sample process GPU memory via NVML. Requires benchmark-gpu extras.
-    sync : callable, optional
-        Called as sync(result) after func() returns. Use this to include
-        asynchronous JAX work, e.g. sync=lambda _: jax.block_until_ready(designer.EIG).
     metadata : dict, optional
         JSON-serializable metadata copied into trace.json and summary.csv.
     """
@@ -447,7 +531,6 @@ def profile(
     call_start = time.perf_counter()
     try:
         result = func()
-        _sync_result(result, sync)
     finally:
         call_elapsed_s = time.perf_counter() - call_start
         stop_event.set()

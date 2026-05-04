@@ -641,7 +641,13 @@ class ExperimentDesigner:
             self.EIG = jnp.full_like(self.EIG, jnp.nan)
             prior_norm = self.parameters.sum(self.prior)
             if not bool(jnp.allclose(prior_norm, 1.0)):
-                raise ValueError("Prior probabilities must sum to 1")
+                raise ValueError(
+                    "Prior probabilities must sum to 1 "
+                    f"(sum = {prior_norm}). Use the normalized return value, "
+                    "for example `prior = params.normalize(prior)`. JAX arrays "
+                    "are immutable, so `params.normalize(prior)` cannot update a "
+                    "JAX prior in place."
+                )
 
             # Calculate prior entropy in bits (careful with x log x = 0 for x=0).
             log2prior = jnp.where(self.prior > 0, jnp.log2(self.prior), 0)
@@ -651,7 +657,17 @@ class ExperimentDesigner:
 
             if self.num_subgrids > 1 and not debug:
                 self.subgrid_shape = self._get_chunk_scan_setup()["chunk_shape"]
-                marginal, ig, eig_flat = self._get_chunked_eig_kernel()(self.prior, h0)
+                try:
+                    marginal, ig, eig_flat = self._get_chunked_eig_kernel()(
+                        self.prior, h0
+                    )
+                except jax.errors.TracerArrayConversionError as exc:
+                    raise TypeError(
+                        "unnorm_lfunc must be JAX-traceable when using chunked "
+                        "calculateEIG. Replace numpy operations inside "
+                        "unnorm_lfunc with jax.numpy operations, for example "
+                        "`np.exp` -> `jnp.exp` and `np.square` -> `jnp.square`."
+                    ) from exc
                 self.marginal = marginal
                 self.IG = ig
                 self.EIG = jnp.reshape(eig_flat, self.designs.shape)

@@ -171,41 +171,11 @@ Columns:
 - `rss_delta_mb_jax`: JAX peak RSS delta from READY
 - `gpu_delta_mb_jax`: JAX GPU/device peak delta from READY, when available
 
-```python
-from bed.benchmark import plot_sweep
-
-sweeps = Path("historical/sweeps")
-
-y_cols = {
-    "macbook NumPy": "rss_delta_mb_np",
-    "macbook JAX": "rss_delta_mb_jax",
-    "entropy NumPy": "rss_delta_mb_np",
-    "entropy JAX": "rss_delta_mb_jax",
-    "perlmutter NumPy": "rss_delta_mb_np",
-    "perlmutter JAX": "rss_delta_mb_jax",
-}
-
-plot_sweep(
-    [
-        sweeps / "macbook_full_peak.csv",
-        sweeps / "macbook_full_peak.csv",
-        sweeps / "entropy_full_peak.csv",
-        sweeps / "entropy_full_peak.csv",
-        sweeps / "perlmutter_full_peak.csv",
-        sweeps / "perlmutter_full_peak.csv",
-    ],
-    labels,
-    plots / "sweep_full_grid_peak_memory_cpu.png",
-    x_col="n_param_axis",
-    y_col=y_cols,
-    group_col=None,
-    colors=colors,
-    linestyles=linestyles,
-    alpha=0.6,
-    ylabel="Peak RSS delta from READY (MiB)",
-    title="Full-grid CPU peak memory sweep",
-)
-```
+These CSVs are intentionally plain tables so project-specific comparison plots
+can be regenerated with regular `pandas`/`matplotlib` code. The installable
+benchmark API stays focused on profiling individual runs and combining their
+memory traces; peak-memory comparisons are easier to configure explicitly for a
+given experiment.
 
 ## Regenerating the Curated CSVs
 

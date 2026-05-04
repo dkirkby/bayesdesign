@@ -2,6 +2,7 @@
 
 import inspect
 
+import numpy as np
 import pytest
 
 jax = pytest.importorskip("jax")
@@ -139,6 +140,15 @@ def test_grid_normalize_returns_jax_array():
     assert bool(jnp.isclose(jnp.sum(normed), 1.0, rtol=RTOL))
 
 
+def test_grid_normalize_updates_mutable_numpy_input():
+    grid = Grid(x=jnp.arange(3))
+    values = np.ones(grid.shape)
+    normed = grid.normalize(values)
+    assert _is_jax_array(normed)
+    assert np.isclose(grid.sum(values), 1.0, rtol=RTOL)
+    np.testing.assert_allclose(values, np.asarray(normed), rtol=RTOL)
+
+
 def test_grid_device_placement(target_device):
     grid = Grid(
         device=target_device.platform,
@@ -184,6 +194,19 @@ def test_designer_structural_init_and_core_methods():
 
     updated_best = designer.update(t=0.0, y=0.0)
     assert "t" in updated_best
+
+
+def test_designer_prior_validation_mentions_normalize_return_value():
+    params = Grid(p=jnp.array([0.0, 1.0]))
+    features = Grid(y=jnp.array([0.0, 1.0]))
+    designs = Grid(t=jnp.array([0.0, 1.0]))
+    designer = ExperimentDesigner(
+        params, features, designs, _dummy_lfunc, lfunc_args={"sigma_y": 0.25}
+    )
+    prior = jnp.ones(params.shape)
+
+    with pytest.raises(ValueError, match="prior = params.normalize\\(prior\\)"):
+        designer.calculateEIG(prior)
 
 
 def test_designer_methods_run_on_selected_device(target_device):
@@ -267,6 +290,30 @@ def test_designer_subgrid_fullgrid_parity():
     assert bool(
         jnp.allclose(full_marginal, subgrid_marginal, rtol=1e-6, atol=1e-9)
     )
+
+
+def test_designer_subgrid_requires_jax_traceable_likelihood():
+    params = Grid(p=jnp.array([0.0, 1.0]))
+    features = Grid(y=jnp.linspace(-1.0, 1.0, 5))
+    designs = Grid(t=jnp.linspace(0.0, 1.0, 4))
+
+    def numpy_lfunc(params, features, designs, **kwargs):
+        y_mean = np.square(designs.t - params.p)
+        y_diff = features.y - y_mean
+        return np.exp(-0.5 * np.square(y_diff / kwargs["sigma_y"]))
+
+    designer = ExperimentDesigner(
+        params,
+        features,
+        designs,
+        numpy_lfunc,
+        lfunc_args={"sigma_y": 0.25},
+        design_chunk_size=2,
+    )
+    prior = params.normalize(np.ones(params.shape))
+
+    with pytest.raises(TypeError, match="unnorm_lfunc must be JAX-traceable"):
+        designer.calculateEIG(prior)
 
 
 def test_designer_requested_device_mismatch_raises():

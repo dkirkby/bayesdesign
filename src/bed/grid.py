@@ -7,6 +7,7 @@ import math
 import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
+import numpy as np
 
 from .util import resolve_device
 
@@ -258,10 +259,18 @@ class Grid:
 
     def normalize(self, values):
         """Normalize the array values over our grid."""
+        original = values
         with jax.default_device(self.device):
             values = jnp.asarray(values)
             norm = self.sum(values, keepdims=True)
-            return values / norm
+            normalized = values / norm
+        if (
+            isinstance(original, np.ndarray)
+            and original.flags.writeable
+            and np.issubdtype(original.dtype, np.floating)
+        ):
+            original[...] = np.asarray(normalized)
+        return normalized
 
     def extent(self, name):
         """Return the (min,max) extent of the named axis.
