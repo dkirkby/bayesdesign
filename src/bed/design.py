@@ -50,7 +50,20 @@ class ExperimentDesigner:
         self.designs = designs
         self.unnorm_lfunc = unnorm_lfunc
         self.lfunc_args = {} if lfunc_args is None else lfunc_args
-        self.device = resolve_device(device)
+
+        # Resolve device: when device is None, inherit from the grids if they
+        # all agree on the same device, otherwise fall back to the default.
+        if device is None:
+            grid_devices = {
+                g.device
+                for g in (self.parameters, self.features, self.designs)
+            }
+            if len(grid_devices) == 1:
+                self.device = next(iter(grid_devices))
+            else:
+                self.device = resolve_device(None)
+        else:
+            self.device = resolve_device(device)
 
         for name, grid in (
             ("parameters", self.parameters),

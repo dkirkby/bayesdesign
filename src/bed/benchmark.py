@@ -237,7 +237,7 @@ def _display_or_save(fig, output_path):
 
 def _normalize_csv_inputs(csv_paths, labels):
     paths = [Path(path) for path in csv_paths]
-    labels = list(labels)
+    labels = list(labels) if labels else [Path(p).stem for p in csv_paths]
     if len(paths) != len(labels):
         raise ValueError("csv_paths and labels must have the same length.")
     if not paths:
@@ -413,7 +413,7 @@ def plot_timeseries(
         if labels:
             value_cols = dict(zip(labels, columns))
     else:
-        paths, labels = _normalize_csv_inputs(data, labels or [])
+        paths, labels = _normalize_csv_inputs(data, labels)
 
     colors_by_label = _style_by_label(colors, labels, "colors")
     linestyles_by_label = _style_by_label(linestyles, labels, "linestyles")
