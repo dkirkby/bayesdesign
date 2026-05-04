@@ -179,15 +179,13 @@ given experiment.
 
 ## Regenerating the Curated CSVs
 
-The curated CSVs are generated from the old raw `benchmark_results/` traces:
+The curated CSVs in `historical/` are preserved benchmark artifacts derived from
+the old raw `benchmark_results/` traces. The historical conversion helper used to
+produce them is not included in this repository, so the tables cannot currently be
+regenerated from a documented in-repo command.
 
-```bash
-conda run -n bayesdesign python prepare_existing_benchmark_data.py \
-    --source ../../benchmark_results \
-    --output historical
-```
-
-The converter intentionally keeps only:
+Treat the checked-in CSVs as the canonical historical outputs. The original
+converter intentionally kept only:
 
 - named machines: `macbook`, `entropy`, and `perlmutter`
 - 3D sine-wave benchmarks
