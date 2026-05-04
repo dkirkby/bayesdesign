@@ -6,7 +6,29 @@ This is the log of changes to the [bayesdesign package](https://github.com/dkirk
 
 All notable changes to this project will be documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.6.0] - Unreleased
+## [0.7.0] - 2026-05-04
+
+### Added
+
+- JAX-backed `Grid`, `GridStack`, priors, and `ExperimentDesigner`, with `float64` execution and explicit device placement for CPU/GPU and multi-device runs
+- `bed.benchmark` for structured timing and memory measurements; optional `benchmark` / `benchmark-gpu` extras (`psutil`, `matplotlib`, and GPU telemetry where available)
+- `examples/Benchmarking.ipynb` and versioned benchmark inputs under `docs/benchmarks/` (including sweeps and time-series artifacts used in the notebook)
+- Expanded tests: baseline parity checks, runtime coverage, and benchmark tests (`tests/test_baseline.py`, `tests/test_runtime.py`, `tests/test_benchmark.py`, `tests/conftest.py`)
+- `bed.util` helpers supporting the JAX port
+
+### Changed
+
+- **Python 3.10+** is now required
+- **Core dependency `jax>=0.4.0`** (alongside NumPy); optional CUDA wheels via `jax-cuda12` / `jax-cuda13` extras in `setup.py`
+- Example notebooks (`SineWave`, `MultiParameter`, `LocationFinding`, `GridConstraints`, `Subgrids`) updated for the JAX API and numerics
+- `ExperimentDesigner` and `Grid` internals refactored for JAX (including subgrid / kernel execution paths used in benchmarks)
+
+### Fixed
+
+- `calculateMarginalEIG` now uses the declared parameters-of-interest axes in entropy and information-gain reductions, avoiding incorrect shapes (issue #14)
+- GPU-oriented benchmark logging and device-selection edge cases addressed during the JAX rollout
+
+## [0.6.0] - 2026-05-04
 
 - Modernized GitHub Actions release workflow with trusted publishing, enhanced pre-release validation, and scientific package-specific features (issue #11)
 
