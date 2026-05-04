@@ -16,13 +16,17 @@ class Grid:
 
     def __init__(self, constraint=None, full_shape=None, device=None, **axes):
         if device is None:
-            # Infer the device from the first JAX array input, if any.
-            inferred = None
-            for v in axes.values():
-                if isinstance(v, jax.Array):
-                    inferred = v.device
-                    break
-            self.device = inferred if inferred is not None else resolve_device(None)
+            # Infer device from JAX array inputs; raise if they disagree.
+            inferred_devices = {
+                v.device for v in axes.values() if isinstance(v, jax.Array)
+            }
+            if len(inferred_devices) > 1:
+                raise ValueError(
+                    "Input JAX arrays are on different devices; specify device= explicitly."
+                )
+            self.device = (
+                inferred_devices.pop() if inferred_devices else resolve_device(None)
+            )
         else:
             self.device = resolve_device(device)
         self.axes = {}
