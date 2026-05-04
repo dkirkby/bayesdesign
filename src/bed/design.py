@@ -1,6 +1,7 @@
 """JAX implementation of experiment design APIs."""
 
 import math
+import types
 
 import jax
 jax.config.update("jax_enable_x64", True)
@@ -8,27 +9,6 @@ import jax.numpy as jnp
 
 from .grid import Grid, GridStack
 from .util import resolve_device
-
-
-class _AxisBundle:
-    """Minimal attribute-access wrapper for array-valued grid axes."""
-
-    __slots__ = ("_axes",)
-
-    def __init__(self, axes):
-        self._axes = axes
-
-    def __getattr__(self, name):
-        try:
-            return self._axes[name]
-        except KeyError as exc:
-            raise AttributeError(name) from exc
-
-
-def _segment_sum(values, segment_ids, num_segments):
-    if hasattr(jax.lax, "segment_sum"):
-        return jax.lax.segment_sum(values, segment_ids, num_segments=num_segments)
-    return jax.ops.segment_sum(values, segment_ids, num_segments=num_segments)
 
 
 class ExperimentDesigner:
@@ -154,7 +134,7 @@ class ExperimentDesigner:
             shape = [1] * total_ndim
             shape[offset : offset + len(grid.shape)] = grid.shape
             axes[name] = jnp.reshape(values, tuple(shape))
-        return _AxisBundle(axes)
+        return types.SimpleNamespace(**axes)
 
     def _flattened_design_axes(self):
         return {
@@ -429,7 +409,7 @@ class ExperimentDesigner:
                     shape = [1] * total_ndim
                     shape[design_offset] = key
                     design_axes[name] = jnp.reshape(chunk_values, tuple(shape))
-                designs_bundle = _AxisBundle(design_axes)
+                designs_bundle = types.SimpleNamespace(**design_axes)
 
                 likelihood = self.unnorm_lfunc(
                     params_bundle,
@@ -497,7 +477,7 @@ class ExperimentDesigner:
                     shape = [1] * total_ndim
                     shape[design_offset] = key[0]
                     design_axes[name] = jnp.reshape(chunk_values, tuple(shape))
-                designs_bundle = _AxisBundle(design_axes)
+                designs_bundle = types.SimpleNamespace(**design_axes)
 
                 likelihood = self.unnorm_lfunc(
                     params_bundle,
@@ -548,7 +528,7 @@ class ExperimentDesigner:
             def one_feature(likelihood_row):
                 weighted = likelihood_row * prior
                 marginal = jnp.sum(weighted * param_weights_grid)
-                post_weighted = _segment_sum(
+                post_weighted = jax.ops.segment_sum(
                     jnp.reshape(weighted, (param_size,)) * param_weights,
                     group_ids,
                     num_segments=num_segments,
@@ -605,7 +585,7 @@ class ExperimentDesigner:
                         jnp.zeros_like(likelihood_row),
                     )
                     marginal = jnp.sum(weighted * param_weights_grid)
-                    post_weighted = _segment_sum(
+                    post_weighted = jax.ops.segment_sum(
                         jnp.reshape(weighted, (param_size,)) * param_weights,
                         group_ids,
                         num_segments=num_segments,
@@ -769,7 +749,7 @@ class ExperimentDesigner:
         with jax.default_device(self.device):
             param_size = int(math.prod(self.parameters.shape))
             param_weights = self._param_weights_flat
-            prior_interest = _segment_sum(
+            prior_interest = jax.ops.segment_sum(
                 jnp.reshape(self.prior, (param_size,)) * param_weights,
                 group_ids,
                 num_segments=num_segments,
