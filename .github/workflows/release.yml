@@ -27,6 +27,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install tox pytest jupyter nbconvert matplotlib
           pip install -r requirements.txt
+          pip install -e ".[benchmark]"
       
       - name: Extract version from tag
         id: get_version
